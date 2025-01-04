@@ -41,6 +41,7 @@
             e.preventDefault();
             setActiveItem(item);
             e.currentTarget?.blur();
+            value = "";
           }}
         >
           {getName(item)}
