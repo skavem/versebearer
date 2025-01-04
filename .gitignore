@@ -1,0 +1,14 @@
+build
+bin
+.task
+
+go.mod
+go.sum
+
+test.db
+
+.svelte-kit
+frontend/src/lib/bindings
+frontend/dist
+node_modules
+package-lock.json
