@@ -115,7 +115,7 @@
 				{/if}
 			{/snippet}
 			{#snippet leftMark(i)}
-				<div class="bg-sealight rounded px-1 text-white">
+				<div class="badge badge-neutral badge-md">
 					{i.number.toString()}
 				</div>
 			{/snippet}

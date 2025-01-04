@@ -49,8 +49,8 @@
   });
 </script>
 
-<div class="flex flex-row p-4 h-[calc(100vh-4rem)] gap-2">
-  <div class="flex flex-col w-1/3 gap-2">
+<div class="flex h-[calc(100vh-4rem)] flex-row gap-2 p-4">
+  <div class="flex w-1/3 flex-col gap-2">
     <Select
       items={songs.list}
       activeItem={songs.active}
@@ -66,11 +66,11 @@
       onClick={(i) => (songs.active = i)}
     >
       {#snippet leftMark(i)}
-        <span class="bg-sealight px-1 rounded text-white">{i.number}</span>
+        <span class="badge badge-neutral font-semibold">{i.number}</span>
       {/snippet}
       {#snippet rightMark(i)}
         <button
-          class="hidden h-full items-center group-hover/item:flex hover:bg-sealight hover:text-white p-1 rounded"
+          class="btn btn-neutral btn-xs invisible text-white group-hover/item:visible"
           onclick={(e) => {
             favorites.add(i);
             e.preventDefault();
@@ -82,7 +82,7 @@
     <CreateSongModal />
   </div>
 
-  <div class="flex flex-col gap-2 w-2/3">
+  <div class="flex w-2/3 flex-col gap-2">
     <Select
       items={couplets.list}
       activeItem={couplets.active}
@@ -94,7 +94,7 @@
 
     <div class="flex justify-center gap-2">
       <button
-        class="bg-seawave text-white rounded p-2 px-4 flex gap-2 cursor-pointer"
+        class="bg-seawave flex cursor-pointer gap-2 rounded p-2 px-4 text-white"
         onclick={() => {
           console.log(shown?.ID, couplets.active?.ID);
           if (!shown) {
@@ -109,7 +109,7 @@
       </button>
     </div>
 
-    <div class="w-full h-1/3">
+    <div class="h-1/3 w-full">
       <List
         items={favorites.list}
         activeItem={null}
@@ -117,7 +117,7 @@
         onClick={(i) => (songs.active = i)}
       >
         {#snippet leftMark(i)}
-          <span class="bg-sealight rounded text-white px-2">{i.number}</span>
+          <span class="badge badge-neutral text-white">{i.number}</span>
         {/snippet}
       </List>
     </div>
