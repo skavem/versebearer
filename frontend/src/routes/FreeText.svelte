@@ -14,8 +14,6 @@
   });
   let screens = $state<Screen[]>([]);
   Screens.GetAll().then((s) => (screens = s));
-
-  $inspect(selected, screens);
 </script>
 
 <div class="flex select-none flex-row gap-2 p-4">

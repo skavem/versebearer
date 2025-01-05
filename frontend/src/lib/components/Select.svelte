@@ -21,7 +21,27 @@
       getSearchLabel(i).toLocaleLowerCase().includes(value.toLocaleLowerCase()),
     ),
   );
+
+  let dropdownContentEl = $state<HTMLUListElement | null>(null);
+  let windowHeight = $state(0);
+  $effect(() => {
+    shownItems;
+    if (!dropdownContentEl || !windowHeight) return;
+    const maxHeight =
+      windowHeight - dropdownContentEl.getBoundingClientRect().top - 10;
+    if (dropdownContentEl.scrollHeight <= maxHeight) return;
+    dropdownContentEl.style.height = `${maxHeight}px`;
+  });
+
+  let inputEl = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    shownItems;
+    if (!inputEl || !dropdownContentEl) return;
+    dropdownContentEl.style.width = `${inputEl.getBoundingClientRect().width}px`;
+  });
 </script>
+
+<svelte:window bind:innerHeight={windowHeight} />
 
 <div class="dropdown">
   <input
@@ -29,9 +49,11 @@
     class="input input-bordered w-full"
     placeholder={activeItem ? getName(activeItem) : ""}
     bind:value
+    bind:this={inputEl}
   />
   <ul
-    class="dropdown-content menu bg-base-100 rounded-box z-10 w-52 p-2 shadow"
+    class="dropdown-content menu bg-base-100 rounded-box z-10 flex-nowrap overflow-y-scroll p-2 shadow"
+    bind:this={dropdownContentEl}
   >
     {#each shownItems as item}
       <li onfocus={console.log}>

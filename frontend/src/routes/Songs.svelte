@@ -94,7 +94,7 @@
 
     <div class="flex justify-center gap-2">
       <button
-        class="bg-seawave flex cursor-pointer gap-2 rounded p-2 px-4 text-white"
+        class="btn btn-neutral text-white"
         onclick={() => {
           console.log(shown?.ID, couplets.active?.ID);
           if (!shown) {
