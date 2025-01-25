@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Book } from "$lib/bindings/changeme/backend/models";
   import {
     GetTranslations,
     HideVerse,
@@ -76,26 +77,26 @@
       setActiveItem={(i) => (books.active = i)}
     />
     <List
-      items={books.list}
+      items={books.list.flatMap((b) => {
+        const bs = [b];
+        if (b.dividerBefore) {
+          return [
+            {
+              ID: -1,
+              title: b.dividerBefore,
+            } as Book,
+            b,
+          ];
+        }
+        return bs;
+      })}
       getName={(i) => i.title}
       onClick={(i) => (books.active = i)}
       activeItem={books.active}
-    >
-      {#snippet dividerBefore(item)}
-        {#if item.dividerBefore}
-          <div class="relative flex cursor-default items-center p-2">
-            <div class="flex-grow border-t-2 border-gray-400"></div>
-            <span class="mx-1 flex-shrink text-gray-700"
-              >{item.dividerBefore}</span
-            >
-            <div class="flex-grow border-t-2 border-gray-400"></div>
-          </div>
-        {/if}
-      {/snippet}
-    </List>
+    ></List>
   </div>
 
-  <div>
+  <div class="w-1/12">
     <List
       items={chapters.list}
       getName={(i) => i.number.toString()}
@@ -104,7 +105,7 @@
     />
   </div>
 
-  <div class="flex flex-col gap-2">
+  <div class="flex flex-grow flex-col gap-2">
     <List
       items={verses.list}
       getName={(i) => i.text}

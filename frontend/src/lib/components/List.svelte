@@ -10,8 +10,6 @@
     activeItem,
     leftMark,
     rightMark,
-    dividerBefore,
-    multiline = false,
   }: {
     items: T[];
     getName: (v: T) => string;
@@ -20,26 +18,37 @@
     activeItem: T | null;
     leftMark?: Snippet<[T]>;
     rightMark?: Snippet<[T]>;
-    dividerBefore?: Snippet<[T]>;
-    multiline?: boolean;
   } = $props();
 
-  let isLarge = $derived(items.length > 100);
-  let totalSices = $derived(Math.ceil(items.length / 100));
-  let curSlice = $state(0);
-  const sliceSize = 100;
-  let shownItems = $derived.by(() => {
-    if (!isLarge) {
-      return items;
-    }
+  let mainDiv = $state<HTMLDivElement | null>(null);
+  let scrollTop = $state(0);
+  let shown = $derived.by(() => {
+    const from = Math.floor(scrollTop / 44);
 
-    return items.slice(sliceSize * curSlice, sliceSize * (curSlice + 1));
+    const to = Math.min(
+      items.length - 1,
+      Math.floor(
+        (scrollTop + (mainDiv?.getBoundingClientRect().height || 0)) / 44,
+      ) + 1,
+    );
+
+    return {
+      from,
+      to,
+    };
+  });
+
+  $effect(() => {
+    window.addEventListener("resize", () => {
+      if (!mainDiv) return;
+      scrollTop = mainDiv.scrollTop + 1;
+    });
   });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="h-full border-zinc-100 border-2 overflow-y-scroll select-none group/list"
+  class="group/list h-full select-none overflow-y-scroll border-2 border-zinc-100"
   onkeydown={(e) => {
     if (
       ["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].indexOf(
@@ -49,38 +58,28 @@
       e.preventDefault();
     }
   }}
+  bind:this={mainDiv}
+  onscroll={(e) => {
+    if (!mainDiv) return;
+    scrollTop = mainDiv.scrollTop;
+  }}
 >
-  {#each shownItems as item}
-    <ListItem
-      isActive={(activeItem?.ID || 0) === item.ID}
-      onclick={() => {
-        onClick(item);
-      }}
-      ondblclick={() => {
-        onDoubleClick?.(item);
-      }}
-      {getName}
-      {item}
-      {leftMark}
-      {rightMark}
-      {dividerBefore}
-      {multiline}
-    />
-  {/each}
-</div>
-
-{#if isLarge}
-  <div class="w-full flex flex-row gap-1 overflow-scroll pb-2">
-    {#each new Array(totalSices).fill(null) as _, ind}
-      {@const selected = ind === curSlice}
-      <button
-        class="rounded-full border p-1 flex items-center justify-center hover:bg-zinc-200 cursor-pointer"
-        class:border-zinc-100={!selected}
-        class:border-seawave={selected}
-        onclick={() => (curSlice = ind)}
-      >
-        {ind}
-      </button>
+  <div class="relative w-full" style:height={`${(items.length - 1) * 44}px`}>
+    {#each items.slice(shown.from, shown.to) as item, ind}
+      <ListItem
+        isActive={(activeItem?.ID || 0) === item.ID}
+        onclick={() => {
+          onClick(item);
+        }}
+        ondblclick={() => {
+          onDoubleClick?.(item);
+        }}
+        top={(shown.from + ind) * 44}
+        {getName}
+        {item}
+        {leftMark}
+        {rightMark}
+      />
     {/each}
   </div>
-{/if}
+</div>

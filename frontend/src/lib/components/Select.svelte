@@ -1,4 +1,6 @@
 <script lang="ts" generics="T extends { ID: number }">
+  import { slide } from "svelte/transition";
+
   let {
     items = $bindable(),
     getName,
@@ -17,9 +19,13 @@
 
   let value = $state("");
   let shownItems = $derived.by(() =>
-    items.filter((i) =>
-      getSearchLabel(i).toLocaleLowerCase().includes(value.toLocaleLowerCase()),
-    ),
+    items
+      .filter((i) =>
+        getSearchLabel(i)
+          .toLocaleLowerCase()
+          .includes(value.toLocaleLowerCase()),
+      )
+      .slice(0, 20),
   );
 
   let dropdownContentEl = $state<HTMLUListElement | null>(null);

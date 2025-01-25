@@ -7,21 +7,19 @@
     onclick,
     ondblclick,
     item,
+    top,
     leftMark,
     rightMark,
-    dividerBefore,
     getName,
-    multiline,
   }: {
     isActive: boolean;
     onclick?: MouseEventHandler<HTMLDivElement> | null;
     ondblclick?: MouseEventHandler<HTMLDivElement> | null;
     item: T;
+    top: number;
     leftMark?: Snippet<[T]>;
     rightMark?: Snippet<[T]>;
-    dividerBefore?: Snippet<[T]>;
     getName: (i: T) => string;
-    multiline: boolean;
   } = $props();
 
   let outerDiv = $state<HTMLDivElement | null>(null);
@@ -31,39 +29,42 @@
       outerDiv.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   });
+  const isDivider = $derived(item.ID === -1);
 </script>
-
-{@render dividerBefore?.(item)}
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-  bind:this={outerDiv}
-  class={[
-    "group/item flex cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
-    !isActive && "border-transparent",
-    isActive && "border-primary",
-  ]}
-  {onclick}
-  {ondblclick}
->
+{#if isDivider}
   <div
-    class="flex"
-    class:flex-col={multiline}
-    class:gap-1={multiline}
-    class:gap-2={!multiline}
-    class:items-center={!multiline}
+    class="divider absolute m-0 flex h-[44px] w-full cursor-default"
+    style:top={`${top}px`}
   >
-    {#if leftMark}
-      {@render leftMark(item)}
-    {/if}
-
-    <span class:whitespace-pre={multiline}>
-      {getName(item)}
-    </span>
+    {getName(item)}
   </div>
+{:else}
+  <div
+    bind:this={outerDiv}
+    style:top={`${top}px`}
+    class={[
+      "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
+      !isActive && "border-transparent",
+      isActive && "border-primary",
+    ]}
+    {onclick}
+    {ondblclick}
+  >
+    <div class="flex min-w-[calc(100%-34px)] items-center gap-2">
+      {#if leftMark}
+        {@render leftMark(item)}
+      {/if}
 
-  {#if rightMark}
-    {@render rightMark(item)}
-  {/if}
-</div>
+      <span class="overflow-hidden text-ellipsis whitespace-nowrap"
+        >{getName(item)}</span
+      >
+    </div>
+
+    {#if rightMark}
+      {@render rightMark(item)}
+    {/if}
+  </div>
+{/if}
