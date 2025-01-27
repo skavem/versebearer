@@ -1,18 +1,10 @@
 <script lang="ts">
   import { Book } from "$lib/bindings/changeme/backend/models";
-  import {
-    GetTranslations,
-    HideVerse,
-    ShowVerse,
-  } from "$lib/bindings/changeme/dbhandler";
+  import { HideVerse, ShowVerse } from "$lib/bindings/changeme/dbhandler";
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import Select from "$lib/components/Select.svelte";
   import { BibleStore } from "$lib/stores/BibleStore.svelte";
-
-  GetTranslations()
-    .then((tr) => (BibleStore.translations.list = tr))
-    .catch(console.error);
 
   let translations = $derived(BibleStore.translations);
   let books = $derived(BibleStore.books);
@@ -154,9 +146,10 @@
       getName={(i) => i.text}
       onClick={history.restore}
       activeItem={history.active}
+      getKey={(_, i) => i.toString()}
     >
       {#snippet leftMark(i)}
-        <span class="badge badge-neutral badge-md">
+        <span class="badge badge-neutral badge-md text-nowrap">
           {`${i.Book.shortName} ${i.Chapter.number}:${i.number}`}
         </span>
       {/snippet}

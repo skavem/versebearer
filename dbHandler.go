@@ -23,9 +23,36 @@ type ShownCouplet struct {
 
 type DbHandler struct {
 	verse        *ShownVerse
-	couplet      *ShownCouplet
-	app          *application.App
-	EventHandler *application.EventProcessor
+	verseChannel chan *ShownVerse
+
+	couplet        *ShownCouplet
+	coupletChannel chan *ShownCouplet
+
+	app *application.App
+}
+
+func (g *DbHandler) showVerseInternal(verse *ShownVerse) {
+	g.verse = verse
+	g.verseChannel <- verse
+	g.app.EmitEvent("show_verse", g.verse)
+}
+
+func (g *DbHandler) hideVerseInternal() {
+	g.verse = nil
+	g.verseChannel <- nil
+	g.app.EmitEvent("hide_verse", nil)
+}
+
+func (g *DbHandler) showCoupletInternal(couplet *ShownCouplet) {
+	g.couplet = couplet
+	g.coupletChannel <- couplet
+	g.app.EmitEvent("show_couplet", g.couplet)
+}
+
+func (g *DbHandler) hideCoupletInternal() {
+	g.couplet = nil
+	g.coupletChannel <- nil
+	g.app.EmitEvent("hide_couplet", nil)
 }
 
 func (g *DbHandler) GetTranslations() []models.Translation {
@@ -184,14 +211,12 @@ func (g *DbHandler) ShowVerse(verseId float32) *ShownVerse {
 		return nil
 	}
 
-	g.verse = &ShownVerse{
+	g.showVerseInternal(&ShownVerse{
 		Verse:       *verse,
 		Chapter:     *chapter,
 		Book:        *book,
 		Translation: *translation,
-	}
-
-	g.app.EmitEvent("show_verse", g.verse)
+	})
 
 	return g.verse
 }
@@ -201,9 +226,7 @@ func (g *DbHandler) GetShownVerse() *ShownVerse {
 }
 
 func (g *DbHandler) HideVerse() {
-	g.verse = nil
-
-	g.app.EmitEvent("hide_verse", nil)
+	g.hideVerseInternal()
 }
 
 func (g *DbHandler) GetSongs() []models.Song {
@@ -280,12 +303,10 @@ func (g *DbHandler) ShowCouplet(coupletFloatId float32) *ShownCouplet {
 		return nil
 	}
 
-	g.couplet = &ShownCouplet{
+	g.showCoupletInternal(&ShownCouplet{
 		Couplet: *couplet,
 		Song:    *song,
-	}
-
-	g.app.EmitEvent("show_couplet", g.couplet)
+	})
 
 	return g.couplet
 }
@@ -337,9 +358,7 @@ func (g *DbHandler) GetShownCouplet() *ShownCouplet {
 }
 
 func (g *DbHandler) HideCouplet() {
-	g.couplet = nil
-
-	g.app.EmitEvent("hide_couplet", nil)
+	g.hideCoupletInternal()
 }
 
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32) {

@@ -1,6 +1,6 @@
 import type { ShownCouplet } from "$lib/bindings/changeme";
 import { Couplet, Song } from "$lib/bindings/changeme/backend/models";
-import { GetCouplets } from "$lib/bindings/changeme/dbhandler";
+import { GetCouplets, GetSongs } from "$lib/bindings/changeme/dbhandler";
 import { Events } from "@wailsio/runtime";
 
 const createSongsStore = () => {
@@ -123,5 +123,7 @@ const createSongsStore = () => {
 
   return { songs, couplets, favorites };
 };
+
+GetSongs().then((s) => (songsStore.songs.list = s));
 
 export const songsStore = createSongsStore();

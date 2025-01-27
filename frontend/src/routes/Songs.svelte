@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    GetSongs,
-    HideCouplet,
-    ShowCouplet,
-  } from "$lib/bindings/changeme/dbhandler";
+  import { HideCouplet, ShowCouplet } from "$lib/bindings/changeme/dbhandler";
   import CoupletsList from "$lib/components/CoupletsList.svelte";
   import CreateSongModal from "$lib/components/CreateSongModal.svelte";
   import List from "$lib/components/List.svelte";
@@ -11,7 +7,6 @@
   import Select from "$lib/components/Select.svelte";
   import { songsStore } from "$lib/stores/songsStore.svelte";
 
-  GetSongs().then((s) => (songsStore.songs.list = s));
   const songs = $derived(songsStore.songs);
   const couplets = $derived(songsStore.couplets);
   const shown = $derived(songsStore.couplets.shown);
@@ -70,7 +65,7 @@
       {/snippet}
       {#snippet rightMark(i)}
         <button
-          class="btn btn-neutral btn-xs invisible text-white group-hover/item:visible"
+          class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
           onclick={(e) => {
             favorites.add(i);
             e.preventDefault();

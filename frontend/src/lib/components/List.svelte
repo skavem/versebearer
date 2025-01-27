@@ -8,6 +8,7 @@
     onClick,
     onDoubleClick,
     activeItem,
+    getKey = (v) => v.ID.toString(),
     leftMark,
     rightMark,
   }: {
@@ -16,6 +17,7 @@
     onClick: (v: T) => void;
     onDoubleClick?: (v: T) => void;
     activeItem: T | null;
+    getKey?: (v: T, i: number) => string;
     leftMark?: Snippet<[T]>;
     rightMark?: Snippet<[T]>;
   } = $props();
@@ -36,6 +38,20 @@
       from,
       to,
     };
+  });
+
+  let scrolled = $state(false);
+  $effect(() => {
+    activeItem;
+    scrolled = false;
+  });
+  $effect(() => {
+    if (activeItem && mainDiv && !scrolled) {
+      const i = items.findIndex((i) => i.ID === activeItem.ID);
+      if (i > shown.from && i < shown.to) return;
+      scrolled = true;
+      mainDiv.scrollTo({ top: i * 44 });
+    }
   });
 
   $effect(() => {
@@ -65,7 +81,7 @@
   }}
 >
   <div class="relative w-full" style:height={`${(items.length - 1) * 44}px`}>
-    {#each items.slice(shown.from, shown.to) as item, ind}
+    {#each items.slice(shown.from, shown.to + 1) as item, ind (getKey(item, ind))}
       <ListItem
         isActive={(activeItem?.ID || 0) === item.ID}
         onclick={() => {

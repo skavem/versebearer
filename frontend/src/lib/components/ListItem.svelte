@@ -8,27 +8,20 @@
     ondblclick,
     item,
     top,
+    getName,
     leftMark,
     rightMark,
-    getName,
   }: {
     isActive: boolean;
     onclick?: MouseEventHandler<HTMLDivElement> | null;
     ondblclick?: MouseEventHandler<HTMLDivElement> | null;
     item: T;
     top: number;
+    getName: (i: T) => string;
     leftMark?: Snippet<[T]>;
     rightMark?: Snippet<[T]>;
-    getName: (i: T) => string;
   } = $props();
 
-  let outerDiv = $state<HTMLDivElement | null>(null);
-
-  $effect(() => {
-    if (isActive && outerDiv) {
-      outerDiv.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  });
   const isDivider = $derived(item.ID === -1);
 </script>
 
@@ -43,7 +36,6 @@
   </div>
 {:else}
   <div
-    bind:this={outerDiv}
     style:top={`${top}px`}
     class={[
       "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
