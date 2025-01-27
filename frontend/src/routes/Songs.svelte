@@ -89,7 +89,7 @@
 
     <div class="flex justify-center gap-2">
       <button
-        class="btn btn-neutral text-white"
+        class="btn btn-neutral btn-sm"
         onclick={() => {
           console.log(shown?.ID, couplets.active?.ID);
           if (!shown) {

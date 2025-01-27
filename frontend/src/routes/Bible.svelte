@@ -124,10 +124,8 @@
     </List>
 
     <div class="flex justify-center gap-2">
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class="bg-seawave flex cursor-pointer gap-2 rounded p-2 px-4 text-white"
+      <button
+        class="btn btn-neutral btn-sm"
         onclick={() => {
           if (shown) {
             HideVerse();
@@ -138,7 +136,7 @@
       >
         <MuiIcon name={shown ? "visibility_off" : "visibility"} />
         {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
-      </div>
+      </button>
     </div>
 
     <List
