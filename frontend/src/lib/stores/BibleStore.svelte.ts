@@ -8,6 +8,7 @@ import {
 import {
   GetBooks,
   GetChapters,
+  GetShownVerse,
   GetTranslations,
   GetVerses,
 } from "$lib/bindings/changeme/dbhandler";
@@ -226,5 +227,6 @@ const createBibleStore = () => {
 GetTranslations()
   .then((tr) => (BibleStore.translations.list = tr))
   .catch(console.error);
+GetShownVerse().then((v) => (BibleStore.verses.shown = v));
 
 export const BibleStore = createBibleStore();
