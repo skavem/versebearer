@@ -361,11 +361,11 @@ func (g *DbHandler) HideCouplet() {
 	g.hideCoupletInternal()
 }
 
-func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32) {
+func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 	app := application.Get()
 
 	app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
-		Name:        "screen",
+		Name:        name,
 		Title:       "VerseBearer - screen",
 		Frameless:   true,
 		X:           int(x),
@@ -382,9 +382,9 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32) {
 	})
 }
 
-func (g *DbHandler) CloseScreen() {
+func (g *DbHandler) CloseScreen(name string) {
 	app := application.Get()
 
-	s := app.GetWindowByName("screen")
+	s := app.GetWindowByName(name)
 	s.Close()
 }
