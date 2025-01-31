@@ -4,7 +4,6 @@ import (
 	"embed"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -21,13 +20,31 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-func watchChannels(bibleChannel chan *ShownVerse, server *sse.Server, songChannel chan *ShownCouplet) {
+func watchChannels(
+	bibleChannel chan *ShownVerse,
+	songChannel chan *ShownCouplet,
+	userChannel chan bool,
+	server *sse.Server,
+) {
+	var lastVerse *ShownVerse = nil
+	var lastCouplet *ShownCouplet = nil
+
 	for {
 		select {
+		case <-userChannel:
+			data, err := json.Marshal(map[string]any{
+				"type":    "sync",
+				"verse":   lastVerse,
+				"couplet": lastCouplet,
+			})
+			if err != nil {
+				log.Println("Error marshalling verse", err.Error())
+				continue
+			}
+			server.Publish("main", &sse.Event{Data: data})
 		case verse := <-bibleChannel:
-			fmt.Print("\n================\nshow_verse\n================\n")
-
 			if verse == nil {
+				lastVerse = nil
 				data, err := json.Marshal(map[string]string{
 					"type": "hide_verse",
 				})
@@ -38,6 +55,7 @@ func watchChannels(bibleChannel chan *ShownVerse, server *sse.Server, songChanne
 				server.Publish("main", &sse.Event{Data: data})
 				continue
 			} else {
+				lastVerse = verse
 				data, err := json.Marshal(map[string]any{
 					"type":  "show_verse",
 					"verse": verse,
@@ -50,9 +68,8 @@ func watchChannels(bibleChannel chan *ShownVerse, server *sse.Server, songChanne
 				server.Publish("main", &sse.Event{Data: data})
 			}
 		case couplet := <-songChannel:
-			fmt.Print("\n================\nshow_couplet\n================\n")
-
 			if couplet == nil {
+				lastCouplet = nil
 				data, err := json.Marshal(map[string]string{
 					"type": "hide_couplet",
 				})
@@ -63,6 +80,7 @@ func watchChannels(bibleChannel chan *ShownVerse, server *sse.Server, songChanne
 				server.Publish("main", &sse.Event{Data: data})
 				continue
 			} else {
+				lastCouplet = couplet
 				data, err := json.Marshal(map[string]any{
 					"type":    "show_couplet",
 					"couplet": couplet,
@@ -79,11 +97,14 @@ func watchChannels(bibleChannel chan *ShownVerse, server *sse.Server, songChanne
 
 func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet) {
 	server := sse.New()
+	server.AutoReplay = false
 	server.CreateStream("main")
 
+	userChannel := make(chan bool)
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./reciever/dist")))
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		userChannel <- true
 		go func() {
 			<-r.Context().Done()
 			log.Println("Client disconnected")
@@ -93,7 +114,7 @@ func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet) {
 	})
 
 	go func() {
-		watchChannels(bibleChannel, server, songChannel)
+		watchChannels(bibleChannel, songChannel, userChannel, server)
 	}()
 
 	http.ListenAndServe(":9093", mux)

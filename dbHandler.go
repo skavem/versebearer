@@ -378,7 +378,8 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
-		URL: "/screen",
+		// URL: "/screen",
+		URL: "http://localhost:9093",
 	})
 }
 
