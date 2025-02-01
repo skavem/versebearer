@@ -19,10 +19,6 @@
 
   const isOverflown = () => {
     if (!coupletDiv || !innerDiv) return false;
-    console.log(
-      coupletDiv.clientHeight + (qrDiv ? getElHeight(qrDiv) : 0),
-      getElHeight(innerDiv)
-    );
     return (
       coupletDiv.clientHeight + (qrDiv ? getElHeight(qrDiv) : 0) >
       getElHeight(innerDiv)
@@ -45,7 +41,6 @@
       coupletDiv.style.lineHeight = `${size}px`;
       size--;
     }
-    // console.log(coupletDiv.clientHeight, getElHeight(innerDiv), isOverflown());
   });
 </script>
 
@@ -57,7 +52,7 @@
       </div>
       {#if qr}
         <div bind:this={qrDiv} class="qr">
-          <QrCode data="https://platiqr.ru/?uuid=1000093621" />
+          <QrCode data={import.meta.env.VITE_QR_URL} />
         </div>
       {/if}
     </div>
