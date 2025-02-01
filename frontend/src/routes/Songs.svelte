@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { HideCouplet, ShowCouplet } from "$lib/bindings/changeme/dbhandler";
+  import {
+    HideCouplet,
+    HideQR,
+    ShowCouplet,
+    ShowQR,
+  } from "$lib/bindings/changeme/dbhandler";
   import CoupletsList from "$lib/components/CoupletsList.svelte";
   import CreateSongModal from "$lib/components/CreateSongModal.svelte";
   import List from "$lib/components/List.svelte";
@@ -101,6 +106,25 @@
       >
         <MuiIcon name={shown ? "visibility_off" : "visibility"} />
         {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
+      </button>
+
+      <button
+        class={[
+          "btn btn-sm btn-secondary btn-square",
+          {
+            "btn-outline": !songsStore.qr,
+          },
+        ]}
+        onclick={() => {
+          songsStore.qr = !songsStore.qr;
+          if (songsStore.qr) {
+            ShowQR();
+          } else {
+            HideQR();
+          }
+        }}
+      >
+        <MuiIcon name="qr_code" />
       </button>
     </div>
 

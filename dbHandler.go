@@ -29,6 +29,8 @@ type DbHandler struct {
 	couplet        *ShownCouplet
 	coupletChannel chan *ShownCouplet
 
+	qr chan *bool
+
 	app *application.App
 }
 
@@ -391,6 +393,16 @@ func (g *DbHandler) GetShownCouplet() *ShownCouplet {
 
 func (g *DbHandler) HideCouplet() {
 	g.hideCoupletInternal()
+}
+
+func (g *DbHandler) ShowQR() {
+	r := true
+	g.qr <- &r
+}
+
+func (g *DbHandler) HideQR() {
+	r := false
+	g.qr <- &r
 }
 
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {

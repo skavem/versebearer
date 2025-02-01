@@ -129,7 +129,19 @@ const createSongsStore = () => {
     },
   };
 
-  return { songs, couplets, favorites };
+  let qr = $state(false);
+
+  return {
+    songs,
+    couplets,
+    favorites,
+    get qr() {
+      return qr;
+    },
+    set qr(v: boolean) {
+      qr = v;
+    },
+  };
 };
 
 GetSongs().then((s) => (songsStore.songs.list = s));

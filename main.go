@@ -24,10 +24,12 @@ func watchChannels(
 	bibleChannel chan *ShownVerse,
 	songChannel chan *ShownCouplet,
 	userChannel chan bool,
+	qrChannel chan *bool,
 	server *sse.Server,
 ) {
 	var lastVerse *ShownVerse = nil
 	var lastCouplet *ShownCouplet = nil
+	var qr bool = false
 
 	for {
 		select {
@@ -36,6 +38,7 @@ func watchChannels(
 				"type":    "sync",
 				"verse":   lastVerse,
 				"couplet": lastCouplet,
+				"qr":    qr,
 			})
 			if err != nil {
 				log.Println("Error marshalling verse", err.Error())
@@ -91,11 +94,33 @@ func watchChannels(
 				}
 				server.Publish("main", &sse.Event{Data: data})
 			}
+		case curQr := <-qrChannel:
+			qr = *curQr
+			if *curQr == false {
+				data, err := json.Marshal(map[string]string{
+					"type": "hide_qr",
+				})
+				if err != nil {
+					log.Println("Error marshalling verse", err.Error())
+					continue
+				}
+				server.Publish("main", &sse.Event{Data: data})
+				continue
+			} else {
+				data, err := json.Marshal(map[string]string{
+					"type": "show_qr",
+				})
+				if err != nil {
+					log.Println("Error marshalling verse", err.Error())
+					continue
+				}
+				server.Publish("main", &sse.Event{Data: data})
+			}
 		}
 	}
 }
 
-func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet) {
+func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet, qrChannel chan *bool) {
 	server := sse.New()
 	server.AutoReplay = false
 	server.CreateStream("main")
@@ -114,26 +139,31 @@ func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet) {
 	})
 
 	go func() {
-		watchChannels(bibleChannel, songChannel, userChannel, server)
+		watchChannels(bibleChannel, songChannel, userChannel, qrChannel, server)
 	}()
 
 	http.ListenAndServe(":9093", mux)
 }
 
-func createChannels() (bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet) {
+func createChannels() (bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet, qrChannel chan *bool) {
 	bibleChannel = make(chan *ShownVerse)
 	songChannel = make(chan *ShownCouplet)
+	qrChannel = make(chan *bool)
 
-	return bibleChannel, songChannel
+	return bibleChannel, songChannel, qrChannel
 }
 
 // main function serves as the application's entry point. It initializes the application, creates a window,
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
 func main() {
-	bibleChannel, songChannel := createChannels()
-	dbHandler := DbHandler{verseChannel: bibleChannel, coupletChannel: songChannel}
-	go createSSE(bibleChannel, songChannel)
+	bibleChannel, songChannel, qrChannel := createChannels()
+	dbHandler := DbHandler{
+		verseChannel:   bibleChannel,
+		coupletChannel: songChannel,
+		qr:             qrChannel,
+	}
+	go createSSE(bibleChannel, songChannel, qrChannel)
 
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.

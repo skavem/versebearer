@@ -1,10 +1,14 @@
 <script lang="ts">
   import type { IShownCouplet } from "../../types";
+  import QrCode from "@castlenine/svelte-qrcode";
 
-  let { couplet }: { couplet: IShownCouplet | null } = $props();
+  let { couplet, qr }: { couplet: IShownCouplet | null; qr: boolean } =
+    $props();
 
   let innerDiv = $state<null | HTMLDivElement>(null);
   let coupletDiv = $state<null | HTMLDivElement>(null);
+  let qrDiv = $state<null | HTMLDivElement>(null);
+
   const getElHeight = (el: HTMLElement) => {
     var cs = getComputedStyle(el);
     var paddingY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
@@ -15,7 +19,14 @@
 
   const isOverflown = () => {
     if (!coupletDiv || !innerDiv) return false;
-    return coupletDiv.clientHeight > getElHeight(innerDiv);
+    console.log(
+      coupletDiv.clientHeight + (qrDiv ? getElHeight(qrDiv) : 0),
+      getElHeight(innerDiv)
+    );
+    return (
+      coupletDiv.clientHeight + (qrDiv ? getElHeight(qrDiv) : 0) >
+      getElHeight(innerDiv)
+    );
   };
   $effect(() => {
     if (!coupletDiv || !innerDiv || !couplet) return;
@@ -34,7 +45,7 @@
       coupletDiv.style.lineHeight = `${size}px`;
       size--;
     }
-    console.log(coupletDiv.clientHeight, getElHeight(innerDiv), isOverflown());
+    // console.log(coupletDiv.clientHeight, getElHeight(innerDiv), isOverflown());
   });
 </script>
 
@@ -44,6 +55,11 @@
       <div bind:this={coupletDiv} class="text">
         {couplet.text}
       </div>
+      {#if qr}
+        <div bind:this={qrDiv} class="qr">
+          <QrCode data="https://platiqr.ru/?uuid=1000093621" />
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -71,6 +87,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-direction: column;
     padding: 4rem;
     box-sizing: border-box;
 
@@ -89,5 +106,15 @@
     color: white;
     font-family: "Century Gothic";
     box-sizing: border-box;
+  }
+
+  .qr {
+    margin: 1rem;
+    padding: 1rem;
+    display: block;
+    font-size: 0;
+
+    background-color: white;
+    border-radius: 0.5rem;
   }
 </style>
