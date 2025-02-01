@@ -32,91 +32,42 @@ func watchChannels(
 	var qr bool = false
 
 	for {
+		event := map[string]any{}
 		select {
 		case <-userChannel:
-			data, err := json.Marshal(map[string]any{
-				"type":    "sync",
-				"verse":   lastVerse,
-				"couplet": lastCouplet,
-				"qr":    qr,
-			})
-			if err != nil {
-				log.Println("Error marshalling verse", err.Error())
-				continue
-			}
-			server.Publish("main", &sse.Event{Data: data})
+			event["type"] = "sync"
+			event["verse"] = lastVerse
+			event["couplet"] = lastCouplet
+			event["qr"] = qr
 		case verse := <-bibleChannel:
-			if verse == nil {
-				lastVerse = nil
-				data, err := json.Marshal(map[string]string{
-					"type": "hide_verse",
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-				server.Publish("main", &sse.Event{Data: data})
-				continue
-			} else {
+			event["type"] = "hide_verse"
+			lastVerse = nil
+			if verse != nil {
+				event["verse"] = verse
+				event["type"] = "show_verse"
 				lastVerse = verse
-				data, err := json.Marshal(map[string]any{
-					"type":  "show_verse",
-					"verse": verse,
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-
-				server.Publish("main", &sse.Event{Data: data})
 			}
 		case couplet := <-songChannel:
-			if couplet == nil {
-				lastCouplet = nil
-				data, err := json.Marshal(map[string]string{
-					"type": "hide_couplet",
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-				server.Publish("main", &sse.Event{Data: data})
-				continue
-			} else {
+			event["type"] = "hide_couplet"
+			lastCouplet = nil
+			if couplet != nil {
+				event["couplet"] = couplet
+				event["type"] = "show_couplet"
 				lastCouplet = couplet
-				data, err := json.Marshal(map[string]any{
-					"type":    "show_couplet",
-					"couplet": couplet,
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-				server.Publish("main", &sse.Event{Data: data})
 			}
 		case curQr := <-qrChannel:
 			qr = *curQr
-			if *curQr == false {
-				data, err := json.Marshal(map[string]string{
-					"type": "hide_qr",
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-				server.Publish("main", &sse.Event{Data: data})
-				continue
-			} else {
-				data, err := json.Marshal(map[string]string{
-					"type": "show_qr",
-				})
-				if err != nil {
-					log.Println("Error marshalling verse", err.Error())
-					continue
-				}
-				server.Publish("main", &sse.Event{Data: data})
+			event["type"] = "hide_qr"
+			if qr {
+				event["type"] = "show_qr"
 			}
 		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			log.Println("Error marshalling event", err.Error())
+			continue
+		}
+		server.Publish("main", &sse.Event{Data: data})
 	}
 }
 
