@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Book } from "$lib/bindings/changeme/backend/models";
+  import { Book } from "$lib/bindings/changeme/backend/models/models";
   import { HideVerse, ShowVerse } from "$lib/bindings/changeme/dbhandler";
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
