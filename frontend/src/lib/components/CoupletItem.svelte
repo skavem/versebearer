@@ -21,7 +21,7 @@
     rightMark: Snippet<[T]>;
     getName: (i: T) => string;
     multiline: boolean;
-    oncontextmenu: MouseEventHandler<HTMLDivElement>;
+    oncontextmenu?: MouseEventHandler<HTMLDivElement>;
   } = $props();
 
   let outerDiv = $state<HTMLDivElement | null>(null);

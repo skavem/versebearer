@@ -45,7 +45,7 @@
 </script>
 
 <div class="flex h-[calc(100vh-4rem)] flex-row gap-2 p-4">
-  <div class="flex w-1/3 flex-col gap-2">
+  <div class="flex w-1/3 flex-col gap-2 lg:w-1/5">
     <Select
       items={songs.list}
       activeItem={songs.active}
@@ -77,7 +77,7 @@
     <CreateSongModal />
   </div>
 
-  <div class="flex w-2/3 flex-col gap-2">
+  <div class="flex w-2/3 flex-col gap-2 lg:w-4/5">
     <Select
       items={couplets.list}
       activeItem={couplets.active}

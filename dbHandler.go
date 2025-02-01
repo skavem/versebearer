@@ -7,6 +7,7 @@ import (
 	"changeme/backend/models"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"gorm.io/gorm"
 )
 
 type ShownVerse struct {
@@ -53,6 +54,10 @@ func (g *DbHandler) hideCoupletInternal() {
 	g.couplet = nil
 	g.coupletChannel <- nil
 	g.app.EmitEvent("hide_couplet", nil)
+}
+
+func addAscByNumber(db *gorm.DB) *gorm.DB {
+	return db.Order("couplets.number ASC")
 }
 
 func (g *DbHandler) GetTranslations() []models.Translation {
@@ -268,7 +273,7 @@ func (g *DbHandler) CreateSong(number int, title string) {
 
 func (g *DbHandler) getCouplets(songId uint) ([]models.Couplet, error) {
 	couplets := []models.Couplet{}
-	err := inits.DB.Where("song_id = ?", songId).Order("number").Find(&couplets).Error
+	err := inits.DB.Where("song_id = ?", songId).Order("number ASC").Find(&couplets).Error
 	if err != nil {
 		return nil, err
 	}
@@ -324,11 +329,38 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 	}
 
 	song := models.Song{}
-	err := inits.DB.Preload("Couplets").Find(&song, songId).Error
+	err := inits.DB.Preload("Couplets", addAscByNumber).Find(&song, songId).Error
 	if err != nil {
 		log.Println("Error getting new song state", err.Error())
 		return
 	}
+	g.app.EmitEvent("song_update", song)
+}
+
+func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, number int) {
+	couplet := &models.Couplet{}
+	err := inits.DB.First(couplet, coupletId).Error
+	if err != nil {
+		log.Println("Error getting couplet", err.Error())
+		return
+	}
+
+	couplet.Label = label
+	couplet.Text = text
+	couplet.Number = int(number)
+
+	if err := inits.DB.Save(couplet).Error; err != nil {
+		log.Println("Error updating couplet", err.Error())
+		return
+	}
+
+	song := &models.Song{}
+	err = inits.DB.Preload("Couplets", addAscByNumber).Find(song, couplet.SongId).Error
+	if err != nil {
+		log.Println("Error getting new song state", err.Error())
+		return
+	}
+
 	g.app.EmitEvent("song_update", song)
 }
 
@@ -346,7 +378,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 	}
 
 	song := models.Song{}
-	if err := inits.DB.Preload("Couplets").Find(&song, couplet.SongId).Error; err != nil {
+	if err := inits.DB.Preload("Couplets", addAscByNumber).Find(&song, couplet.SongId).Error; err != nil {
 		log.Println("Error getting new song state", err.Error())
 		return
 	}

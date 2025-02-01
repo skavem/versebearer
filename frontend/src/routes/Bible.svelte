@@ -88,7 +88,7 @@
     ></List>
   </div>
 
-  <div class="w-1/12">
+  <div class="w-20">
     <List
       items={chapters.list}
       getName={(i) => i.number.toString()}

@@ -64,14 +64,18 @@ const createSongsStore = () => {
   };
   Events.On(
     "songs_update",
-    ({ data }: { data: Song[] }) => (songs.list = data),
+    ({ data }: { data: Song[][] }) => (songs.list = data[0]),
   );
-  Events.On("song_update", ({ data }: { data: Song }) => {
-    console.log(data);
-
-    if (songs.active?.ID === data.ID) {
-      coupletsList = data.couplets;
+  Events.On("song_update", ({ data }: { data: Song[] }) => {
+    if (songs.active?.ID !== data[0].ID) {
+      return;
     }
+    coupletsList = data[0].couplets;
+    const active = coupletsList.find((v) => v.ID === activeCouplet?.ID);
+    if (!active) {
+      return;
+    }
+    activeCouplet = active;
   });
 
   const couplets = {
