@@ -7,6 +7,7 @@
     onclick,
     ondblclick,
     item,
+    ind,
     top,
     getName,
     leftMark,
@@ -16,10 +17,11 @@
     onclick?: MouseEventHandler<HTMLDivElement> | null;
     ondblclick?: MouseEventHandler<HTMLDivElement> | null;
     item: T;
+    ind: number;
     top: number;
     getName: (i: T) => string;
-    leftMark?: Snippet<[T]>;
-    rightMark?: Snippet<[T]>;
+    leftMark?: Snippet<[T, number]>;
+    rightMark?: Snippet<[T, number]>;
   } = $props();
 
   const isDivider = $derived(item.ID === -1);
@@ -45,9 +47,9 @@
     {onclick}
     {ondblclick}
   >
-    <div class="flex min-w-[calc(100%-34px)] items-center gap-2">
+    <div class="flex min-w-0 items-center gap-2">
       {#if leftMark}
-        {@render leftMark(item)}
+        {@render leftMark(item, ind)}
       {/if}
 
       <span class="overflow-hidden text-ellipsis whitespace-nowrap"
@@ -56,7 +58,7 @@
     </div>
 
     {#if rightMark}
-      {@render rightMark(item)}
+      {@render rightMark(item, ind)}
     {/if}
   </div>
 {/if}

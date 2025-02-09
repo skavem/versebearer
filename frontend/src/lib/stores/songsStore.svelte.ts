@@ -30,7 +30,7 @@ const createSongsStore = () => {
     hideCouplet();
   });
 
-  const favoriteSongs = $state<Song[]>([]);
+  let favoriteSongs = $state<(Song & { localId: number })[]>([]);
 
   const songs = {
     get loading() {
@@ -119,13 +119,25 @@ const createSongsStore = () => {
     get list() {
       return favoriteSongs;
     },
-
     add(s: Song) {
-      favoriteSongs.push(s);
+      favoriteSongs.push({ ...s, localId: Math.random() });
     },
-    remove(s: Song) {
-      const ind = favoriteSongs.findIndex((fs) => fs.ID === s.ID);
-      favoriteSongs.splice(ind, 1);
+    moveDown(s: (typeof favoriteSongs)[number]) {
+      const ind = favoriteSongs.findIndex((v) => v.localId === s.localId);
+      if (ind === -1 || ind === favoriteSongs.length - 1) return;
+      const next = favoriteSongs[ind + 1];
+      favoriteSongs[ind] = next;
+      favoriteSongs[ind + 1] = s;
+    },
+    moveUp(s: (typeof favoriteSongs)[number]) {
+      const ind = favoriteSongs.findIndex((v) => v.localId === s.localId);
+      if (ind === -1 || ind === 0) return;
+      const next = favoriteSongs[ind - 1];
+      favoriteSongs[ind] = next;
+      favoriteSongs[ind - 1] = s;
+    },
+    remove(localId: number) {
+      favoriteSongs = favoriteSongs.filter((s) => s.localId !== localId);
     },
   };
 

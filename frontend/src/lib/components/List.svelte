@@ -18,8 +18,8 @@
     onDoubleClick?: (v: T) => void;
     activeItem: T | null;
     getKey?: (v: T, i: number) => string;
-    leftMark?: Snippet<[T]>;
-    rightMark?: Snippet<[T]>;
+    leftMark?: Snippet<[T, number]>;
+    rightMark?: Snippet<[T, number]>;
   } = $props();
 
   let mainDiv = $state<HTMLDivElement | null>(null);
@@ -90,6 +90,7 @@
         ondblclick={() => {
           onDoubleClick?.(item);
         }}
+        ind={ind}
         top={(shown.from + ind) * 44}
         {getName}
         {item}

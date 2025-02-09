@@ -134,9 +134,41 @@
         activeItem={null}
         getName={(i) => i.title}
         onClick={(i) => (songs.active = i)}
+        getKey={(_, n) => n.toString()}
       >
         {#snippet leftMark(i)}
           <span class="badge badge-neutral text-white">{i.number}</span>
+        {/snippet}
+        {#snippet rightMark(s)}
+          <div class="flex flex-row gap-1">
+            <button
+              class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
+              onclick={(e) => {
+                favorites.remove(s.localId);
+                e.stopPropagation();
+              }}><MuiIcon name="delete" style="font-size: 1rem" /></button
+            >
+
+            <button
+              class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
+              onclick={(e) => {
+                favorites.moveDown(s);
+                e.stopPropagation();
+              }}
+            >
+              <MuiIcon name="arrow_downward" style="font-size: 1rem" />
+            </button>
+
+            <button
+              class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
+              onclick={(e) => {
+                favorites.moveUp(s);
+                e.stopPropagation();
+              }}
+            >
+              <MuiIcon name="arrow_upward" style="font-size: 1rem" />
+            </button>
+          </div>
         {/snippet}
       </List>
     </div>
