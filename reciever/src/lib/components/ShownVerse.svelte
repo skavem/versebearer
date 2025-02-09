@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fade, fly } from "svelte/transition";
   import type { IShownVerse } from "../../types";
 
   let {
@@ -36,15 +37,17 @@
 </script>
 
 {#if verse}
-  <div class="outer">
+  <div class="outer" transition:fade>
     <div class="inner" bind:this={outerDiv}>
-      <div bind:this={verseDiv} class="text">
-        {verse.text}
-      </div>
+      {#key verse}
+        <div bind:this={verseDiv} class="text" in:fly={{ y: 20 }}>
+          {verse.text}
+        </div>
 
-      <span class="link"
-        >{verse.Book.shortName} {verse.Chapter.number}:{verse.number}</span
-      >
+        <span class="link" in:fly={{ y: 20 }}
+          >{verse.Book.shortName} {verse.Chapter.number}:{verse.number}</span
+        >
+      {/key}
     </div>
   </div>
 {/if}
@@ -80,7 +83,7 @@
 
     border-radius: 1rem;
 
-    background-color: rgb(0 0 0 / 85%);
+    background-color: rgb(0 0 0 / 95%);
   }
 
   .text {

@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { IShownCouplet } from "../../types";
   import QrCode from "@castlenine/svelte-qrcode";
+  import { fade, fly } from "svelte/transition";
+  import type { IShownCouplet } from "../../types";
 
   let { couplet, qr }: { couplet: IShownCouplet | null; qr: boolean } =
     $props();
@@ -45,11 +46,14 @@
 </script>
 
 {#if couplet}
-  <div class="outer">
+  <div class="outer" transition:fade={{ duration: 600 }}>
     <div class="inner" bind:this={innerDiv}>
-      <div bind:this={coupletDiv} class="text">
-        {couplet.text}
-      </div>
+      {#key couplet.text}
+        <div bind:this={coupletDiv} class="text" in:fly={{ y: 20 }}>
+          {couplet.text}
+        </div>
+      {/key}
+
       {#if qr}
         <div bind:this={qrDiv} class="qr">
           <QrCode data={import.meta.env.VITE_QR_URL} />
@@ -63,7 +67,6 @@
   .outer {
     height: 100vh;
     width: 100vw;
-    padding: 2rem;
     box-sizing: border-box;
 
     font-weight: 700;
@@ -89,8 +92,7 @@
     height: 100%;
     width: 100%;
 
-    border-radius: 0.75rem;
-    background-color: rgb(0 0 0 / 85%);
+    background-color: rgb(0 0 0 / 95%);
   }
 
   .text {
