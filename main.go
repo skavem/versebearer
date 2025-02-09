@@ -4,18 +4,16 @@ import (
 	"embed"
 	_ "embed"
 	"encoding/json"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/joho/godotenv"
 	sse "github.com/r3labs/sse/v2"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
-// Wails uses Go's `embed` package to embed the frontend files into the binary.
-// Any files in the frontend/dist folder will be embedded into the binary and
-// made available to the frontend.
-// See https://pkg.go.dev/embed for more information.
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -71,14 +69,36 @@ func watchChannels(
 	}
 }
 
+//go:embed reciever/dist
+var recAssets embed.FS
+
 func createSSE(bibleChannel chan *ShownVerse, songChannel chan *ShownCouplet, qrChannel chan *bool) {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file", err.Error())
+	}
+	isDev := os.Getenv("DEV")
+
 	server := sse.New()
 	server.AutoReplay = false
 	server.CreateStream("main")
 
 	userChannel := make(chan bool)
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir("./reciever/dist")))
+
+	dist, err := fs.Sub(recAssets, "reciever/dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var fsys http.FileSystem
+	if isDev == "true" {
+		fsys = http.Dir("./reciever/dist")
+	} else {
+		fsys = http.FS(dist)
+	}
+	fs := http.FileServer(fsys)
+
+	mux.Handle("/", fs)
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
 		userChannel <- true
 		go func() {
@@ -104,9 +124,6 @@ func createChannels() (bibleChannel chan *ShownVerse, songChannel chan *ShownCou
 	return bibleChannel, songChannel, qrChannel
 }
 
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
 func main() {
 	bibleChannel, songChannel, qrChannel := createChannels()
 	dbHandler := DbHandler{
@@ -116,11 +133,6 @@ func main() {
 	}
 	go createSSE(bibleChannel, songChannel, qrChannel)
 
-	// Create a new Wails application by providing the necessary options.
-	// Variables 'Name' and 'Description' are for application metadata.
-	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
-	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
-	// 'Mac' options tailor the application when running an macOS.
 	app := application.New(application.Options{
 		Name:        "versebearer",
 		Description: "Show Bible verses and christian songs",
@@ -152,9 +164,7 @@ func main() {
 		URL:              "/",
 	})
 
-	// Run the application. This blocks until the application has been exited.
 	err := app.Run()
-	// If an error occurred while running the application, log it and exit.
 	if err != nil {
 		log.Fatal(err)
 	}

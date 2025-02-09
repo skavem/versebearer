@@ -1,6 +1,7 @@
 build
 bin
 .task
+.env
 
 go.mod
 go.sum
