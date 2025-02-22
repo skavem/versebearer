@@ -1,4 +1,4 @@
-<script lang="ts" generics="T extends {ID: number}">
+<script lang="ts">
   import {
     HideCouplet,
     RemoveCouplet,

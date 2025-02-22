@@ -4,6 +4,7 @@
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import Select from "$lib/components/Select.svelte";
+  import VerseList from "$lib/components/VerseList.svelte";
   import { BibleStore } from "$lib/stores/BibleStore.svelte";
 
   let translations = $derived(BibleStore.translations);
@@ -97,10 +98,8 @@
     />
   </div>
 
-  <div class="flex flex-grow flex-col gap-2">
-    <List
-      items={verses.list}
-      getName={(i) => i.text}
+  <div class="flex w-0 flex-grow flex-col gap-2">
+    <VerseList
       onClick={(i) => (verses.active = i)}
       onDoubleClick={(i) => {
         if (i.ID !== shown?.ID) {
@@ -109,19 +108,13 @@
           HideVerse();
         }
       }}
-      activeItem={verses.active}
     >
-      {#snippet rightMark(i)}
-        {#if i.ID === shown?.ID}
-          <MuiIcon name={"remove_red_eye"} />
-        {/if}
-      {/snippet}
       {#snippet leftMark(i)}
         <div class="badge badge-neutral badge-md">
           {i.number.toString()}
         </div>
       {/snippet}
-    </List>
+    </VerseList>
 
     <div class="flex justify-center gap-2">
       <button
@@ -139,18 +132,20 @@
       </button>
     </div>
 
-    <List
-      items={history.list}
-      getName={(i) => i.text}
-      onClick={history.restore}
-      activeItem={history.active}
-      getKey={(_, i) => i.toString()}
-    >
-      {#snippet leftMark(i)}
-        <span class="badge badge-neutral badge-md text-nowrap">
-          {`${i.Book.shortName} ${i.Chapter.number}:${i.number}`}
-        </span>
-      {/snippet}
-    </List>
+    <div class="w-full h-2/5">
+      <List
+        items={history.list}
+        getName={(i) => i.text}
+        onClick={history.restore}
+        activeItem={history.active}
+        getKey={(_, i) => i.toString()}
+      >
+        {#snippet leftMark(i)}
+          <span class="badge badge-neutral badge-md text-nowrap">
+            {`${i.Book.shortName} ${i.Chapter.number}:${i.number}`}
+          </span>
+        {/snippet}
+      </List>
+    </div>
   </div>
 </div>
