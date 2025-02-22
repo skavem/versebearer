@@ -20,7 +20,7 @@
   let isEditMode = $state(false);
   let number = $state(1);
 
-  $inspect(couplets.active)
+  $inspect(couplets.active);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -157,14 +157,14 @@
 </div>
 
 <button
-  class="hover:border-sealight flex w-full flex-row items-center justify-center gap-2 rounded border-2 border-zinc-100 p-2"
+  class="hover:border-black/40 flex w-full flex-row items-center justify-center gap-2 rounded border-2 border-zinc-100 p-2"
   onclick={() => {
     isEditMode = false;
     isModalOpen = true;
     number = (couplets.active?.number ?? 0) + 1;
   }}
 >
-  <p>Добавить после выбранного</p>
+  <p>{couplets.active ? "Добавить после выбранного" : "Добавить в конец"}</p>
   <MuiIcon name="add" />
 </button>
 
