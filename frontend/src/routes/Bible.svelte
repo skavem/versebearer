@@ -99,34 +99,36 @@
   </div>
 
   <div class="flex w-0 flex-grow flex-col gap-2">
-    <VerseList
-      onClick={(i) => (verses.active = i)}
-      onDoubleClick={(i) => {
-        if (i.ID !== shown?.ID) {
-          showVerse();
-        } else {
-          HideVerse();
-        }
-      }}
-    ></VerseList>
-
-    <div class="flex justify-center gap-2">
-      <button
-        class="btn btn-neutral btn-sm"
-        onclick={() => {
-          if (shown) {
-            HideVerse();
-          } else {
+    <div class="flex flex-col h-2/3 w-full gap-2">
+      <VerseList
+        onClick={(i) => (verses.active = i)}
+        onDoubleClick={(i) => {
+          if (i.ID !== shown?.ID) {
             showVerse();
+          } else {
+            HideVerse();
           }
         }}
-      >
-        <MuiIcon name={shown ? "visibility_off" : "visibility"} />
-        {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
-      </button>
+      ></VerseList>
+
+      <div class="flex justify-center gap-2">
+        <button
+          class="btn btn-neutral btn-sm"
+          onclick={() => {
+            if (shown) {
+              HideVerse();
+            } else {
+              showVerse();
+            }
+          }}
+        >
+          <MuiIcon name={shown ? "visibility_off" : "visibility"} />
+          {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
+        </button>
+      </div>
     </div>
 
-    <div class="h-2/5 w-full">
+    <div class="h-1/3 w-full">
       <List
         items={history.list}
         getName={(i) => i.text}

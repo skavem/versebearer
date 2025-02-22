@@ -83,52 +83,54 @@
   </div>
 
   <div class="flex w-2/3 flex-col gap-2 lg:w-4/5">
-    <Select
-      items={couplets.list}
-      activeItem={couplets.active}
-      getName={(i) => i.text}
-      setActiveItem={(i) => (couplets.active = i)}
-    />
+    <div class="flex flex-col gap-2 h-4/5">
+      <Select
+        items={couplets.list}
+        activeItem={couplets.active}
+        getName={(i) => i.text}
+        setActiveItem={(i) => (couplets.active = i)}
+      />
 
-    <CoupletsList />
+      <CoupletsList />
 
-    <div class="flex justify-center gap-2">
-      <button
-        class="btn btn-neutral btn-sm"
-        onclick={() => {
-          console.log(shown?.ID, couplets.active?.ID);
-          if (!shown) {
-            showCouplet();
-          } else {
-            HideCouplet();
-          }
-        }}
-      >
-        <MuiIcon name={shown ? "visibility_off" : "visibility"} />
-        {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
-      </button>
+      <div class="flex justify-center gap-2">
+        <button
+          class="btn btn-neutral btn-sm"
+          onclick={() => {
+            console.log(shown?.ID, couplets.active?.ID);
+            if (!shown) {
+              showCouplet();
+            } else {
+              HideCouplet();
+            }
+          }}
+        >
+          <MuiIcon name={shown ? "visibility_off" : "visibility"} />
+          {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
+        </button>
 
-      <button
-        class={[
-          "btn btn-sm btn-secondary btn-square",
-          {
-            "btn-outline": !songsStore.qr,
-          },
-        ]}
-        onclick={() => {
-          songsStore.qr = !songsStore.qr;
-          if (songsStore.qr) {
-            ShowQR();
-          } else {
-            HideQR();
-          }
-        }}
-      >
-        <MuiIcon name="qr_code" />
-      </button>
+        <button
+          class={[
+            "btn btn-sm btn-secondary btn-square",
+            {
+              "btn-outline": !songsStore.qr,
+            },
+          ]}
+          onclick={() => {
+            songsStore.qr = !songsStore.qr;
+            if (songsStore.qr) {
+              ShowQR();
+            } else {
+              HideQR();
+            }
+          }}
+        >
+          <MuiIcon name="qr_code" />
+        </button>
+      </div>
     </div>
 
-    <div class="h-1/3 w-full">
+    <div class="h-1/5 w-full">
       <List
         items={favorites.list}
         activeItem={favorites.active}
