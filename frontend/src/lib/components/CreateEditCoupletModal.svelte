@@ -11,20 +11,21 @@
     isModalOpen = $bindable(),
     selected = $bindable(),
     isEdit = $bindable(),
+    number = $bindable(),
   }: {
     isModalOpen: boolean;
     selected: Couplet | null;
     isEdit: boolean;
+    number: number;
   } = $props();
 
   let songId = $derived(songsStore.songs.active?.ID);
 
-  let number = $state(1);
+  // let number = $state(1);
   let text = $state("");
   let label = $state("");
   $effect(() => {
     if (!selected) return;
-    number = selected.number + 1;
     if (!isEdit) return;
     text = selected.text;
     label = selected.label;

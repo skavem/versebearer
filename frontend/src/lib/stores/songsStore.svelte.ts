@@ -57,7 +57,7 @@ const createSongsStore = () => {
       coupletsLoading = true;
       GetCouplets(activeSong!.ID).then((couplets) => {
         coupletsList = couplets;
-        activeCouplet = coupletsList[0];
+        activeCouplet = coupletsList.at(0) || null;
         coupletsLoading = false;
       });
     },
@@ -72,10 +72,7 @@ const createSongsStore = () => {
     }
     coupletsList = data[0].couplets;
     const active = coupletsList.find((v) => v.ID === activeCouplet?.ID);
-    if (!active) {
-      return;
-    }
-    activeCouplet = active;
+    activeCouplet = active ?? coupletsList.at(0) ?? null;
   });
 
   const couplets = {

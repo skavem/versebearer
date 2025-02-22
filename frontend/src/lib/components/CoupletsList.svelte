@@ -18,6 +18,9 @@
 
   let isModalOpen = $state(false);
   let isEditMode = $state(false);
+  let number = $state(1);
+
+  $inspect(couplets.active)
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -67,7 +70,7 @@
     <div class="my-auto flex flex-col gap-2">
       <button
         class="btn btn-neutral btn-sm btn-square"
-        disabled={activeCoupletInd === 0}
+        disabled={activeCoupletInd <= 0}
         onclick={async () => {
           if (activeCoupletInd === 0 || !couplets.active) return;
           const prevCouplet = couplets.list.at(activeCoupletInd - 1)!;
@@ -127,9 +130,11 @@
 
       <button
         class="btn btn-neutral btn-sm btn-square"
+        disabled={!couplets.active}
         onclick={() => {
           isEditMode = true;
           isModalOpen = true;
+          number = couplets.active!.number;
         }}
       >
         <MuiIcon name="edit" />
@@ -156,13 +161,16 @@
   onclick={() => {
     isEditMode = false;
     isModalOpen = true;
+    number = (couplets.active?.number ?? 0) + 1;
   }}
 >
-  Добавить в конец<MuiIcon name="add" />
+  <p>Добавить после выбранного</p>
+  <MuiIcon name="add" />
 </button>
 
 <CreateEditCoupletModal
   bind:isModalOpen
   bind:selected={couplets.active}
   bind:isEdit={isEditMode}
+  bind:number
 />
