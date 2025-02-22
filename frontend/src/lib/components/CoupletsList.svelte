@@ -19,8 +19,6 @@
   let isModalOpen = $state(false);
   let isEditMode = $state(false);
   let number = $state(1);
-
-  $inspect(couplets.active);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
