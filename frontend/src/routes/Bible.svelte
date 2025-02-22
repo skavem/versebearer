@@ -108,13 +108,7 @@
           HideVerse();
         }
       }}
-    >
-      {#snippet leftMark(i)}
-        <div class="badge badge-neutral badge-md">
-          {i.number.toString()}
-        </div>
-      {/snippet}
-    </VerseList>
+    ></VerseList>
 
     <div class="flex justify-center gap-2">
       <button
@@ -132,11 +126,12 @@
       </button>
     </div>
 
-    <div class="w-full h-2/5">
+    <div class="h-2/5 w-full">
       <List
         items={history.list}
         getName={(i) => i.text}
         onClick={history.restore}
+        onDoubleClick={(v) => ShowVerse(v.ID)}
         activeItem={history.active}
         getKey={(_, i) => i.toString()}
       >

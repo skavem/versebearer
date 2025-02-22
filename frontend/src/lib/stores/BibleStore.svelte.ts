@@ -203,6 +203,7 @@ const createBibleStore = () => {
       activeHistoryVerse = v;
     },
     async restore(v: ShownVerse) {
+      activeHistoryVerse = v;
       activeBook = v.Book;
       chaptersList = await GetChapters(activeBook.ID);
       activeChapter = v.Chapter;

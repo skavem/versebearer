@@ -1,6 +1,7 @@
 <script lang="ts" generics="T extends {ID: number}">
   import type { Snippet } from "svelte";
   import type { MouseEventHandler } from "svelte/elements";
+  import { fly } from "svelte/transition";
 
   let {
     isActive,

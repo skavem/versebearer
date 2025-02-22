@@ -1,22 +1,20 @@
 <script lang="ts">
   import type { Verse } from "$lib/bindings/changeme/backend/models";
-  import type { Snippet } from "svelte";
   import type { MouseEventHandler } from "svelte/elements";
+  import MuiIcon from "./MuiIcon.svelte";
 
   let {
     isActive,
+    isShown,
     onclick,
     ondblclick,
     verse,
-    ind,
-    leftMark,
   }: {
     isActive: boolean;
+    isShown: boolean;
     onclick?: MouseEventHandler<HTMLDivElement> | null;
     ondblclick?: MouseEventHandler<HTMLDivElement> | null;
     verse: Verse;
-    ind: number;
-    leftMark?: Snippet<[Verse, number]>;
   } = $props();
 </script>
 
@@ -31,11 +29,17 @@
   {onclick}
   {ondblclick}
 >
-  <div class="flex min-w-0 items-center gap-2">
-    {#if leftMark}
-      {@render leftMark(verse, ind)}
-    {/if}
+  <div class="flex w-full min-w-0 items-center justify-between gap-2">
+    <span>
+      <div class="badge badge-neutral badge-md">
+        {verse.number.toString()}
+      </div>
 
-    <span>{verse.text}</span>
+      {verse.text}</span
+    >
+
+    {#if isShown}
+      <MuiIcon name="visibility" />
+    {/if}
   </div>
 </div>

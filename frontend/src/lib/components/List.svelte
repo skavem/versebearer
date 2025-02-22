@@ -9,6 +9,7 @@
     onDoubleClick,
     activeItem,
     getKey = (v) => v.ID.toString(),
+    getActiveKey = (v) => v.ID,
     leftMark,
     rightMark,
   }: {
@@ -18,6 +19,7 @@
     onDoubleClick?: (v: T) => void;
     activeItem: T | null;
     getKey?: (v: T, i: number) => string;
+    getActiveKey?: (v: T) => number;
     leftMark?: Snippet<[T, number]>;
     rightMark?: Snippet<[T, number]>;
   } = $props();
@@ -47,7 +49,7 @@
   });
   $effect(() => {
     if (activeItem && mainDiv && !scrolled) {
-      const i = items.findIndex((i) => i.ID === activeItem.ID);
+      const i = items.findIndex((i) => getActiveKey(i) === getActiveKey(activeItem));
       if (i > shown.from && i < shown.to) return;
       scrolled = true;
       mainDiv.scrollTo({ top: i * 44 });
@@ -83,14 +85,15 @@
   <div class="relative w-full" style:height={`${(items.length - 1) * 44}px`}>
     {#each items.slice(shown.from, shown.to + 1) as item, ind (getKey(item, ind))}
       <ListItem
-        isActive={(activeItem?.ID || 0) === item.ID}
+        isActive={(activeItem ? getActiveKey(activeItem) : 0) ===
+          getActiveKey(item)}
         onclick={() => {
           onClick(item);
         }}
         ondblclick={() => {
           onDoubleClick?.(item);
         }}
-        ind={ind}
+        {ind}
         top={(shown.from + ind) * 44}
         {getName}
         {item}

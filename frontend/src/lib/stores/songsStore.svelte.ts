@@ -31,6 +31,7 @@ const createSongsStore = () => {
   });
 
   let favoriteSongs = $state<(Song & { localId: number })[]>([]);
+  let activeFavorite = $state<Song & { localId: number } | null>(null);
 
   const songs = {
     get loading() {
@@ -115,6 +116,12 @@ const createSongsStore = () => {
   const favorites = {
     get list() {
       return favoriteSongs;
+    },
+    get active() {
+      return activeFavorite;
+    },
+    set active(v) {
+      activeFavorite = v;
     },
     add(s: Song) {
       favoriteSongs.push({ ...s, localId: Math.random() });

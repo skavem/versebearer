@@ -73,7 +73,7 @@
           class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
           onclick={(e) => {
             favorites.add(i);
-            e.preventDefault();
+            e.stopPropagation();
           }}><MuiIcon name="star" style="font-size: 1rem" /></button
         >
       {/snippet}
@@ -131,9 +131,13 @@
     <div class="h-1/3 w-full">
       <List
         items={favorites.list}
-        activeItem={null}
+        activeItem={favorites.active}
         getName={(i) => i.title}
-        onClick={(i) => (songs.active = i)}
+        getActiveKey={(i) => i.localId}
+        onClick={(i) => {
+          songs.active = i;
+          favorites.active = i;
+        }}
         getKey={(_, n) => n.toString()}
       >
         {#snippet leftMark(i)}
