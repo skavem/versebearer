@@ -38,10 +38,11 @@
 <div
   bind:this={outerDiv}
   class={[
-    "flex flex-row items-center justify-between p-2 hover:bg-zinc-100 gap-2 border-2 rounded cursor-pointer group/item",
+    "group/item flex cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
     {
       "border-transparent": !isActive,
       "border-primary": isActive,
+      "border-black/40": isActive,
     },
   ]}
   {onclick}

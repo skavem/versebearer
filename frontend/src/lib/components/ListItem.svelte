@@ -42,7 +42,7 @@
     class={[
       "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
       !isActive && "border-transparent",
-      isActive && "border-primary",
+      isActive && "border-black/40",
     ]}
     {onclick}
     {ondblclick}
