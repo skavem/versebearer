@@ -1,6 +1,4 @@
 <script lang="ts" generics="T extends { ID: number }">
-  import { slide } from "svelte/transition";
-
   let {
     items = $bindable(),
     getName,

@@ -10,6 +10,7 @@
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import Select from "$lib/components/Select.svelte";
+  import SongsSelect from "$lib/components/SongsSelect.svelte";
   import { songsStore } from "$lib/stores/songsStore.svelte";
 
   const songs = $derived(songsStore.songs);
@@ -51,13 +52,7 @@
 
 <div class="flex h-[calc(100vh-4rem)] flex-row gap-2 p-4">
   <div class="flex w-1/3 flex-col gap-2 lg:w-1/5">
-    <Select
-      items={songs.list}
-      activeItem={songs.active}
-      getName={(i) => `${i.number} - ${i.title}`}
-      getSearchLabel={(i) => `${i.number} ${i.title}`}
-      setActiveItem={(i) => (songs.active = i)}
-    />
+    <SongsSelect />
 
     <List
       items={songs.list}
@@ -83,7 +78,7 @@
   </div>
 
   <div class="flex w-2/3 flex-col gap-2 lg:w-4/5">
-    <div class="flex flex-col gap-2 h-4/5">
+    <div class="flex h-4/5 flex-col gap-2">
       <Select
         items={couplets.list}
         activeItem={couplets.active}
