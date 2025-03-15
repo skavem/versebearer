@@ -5,7 +5,6 @@
     UpdateCouplet,
   } from "$lib/bindings/changeme/dbhandler";
   import { songsStore } from "$lib/stores/songsStore.svelte";
-  import { preventDefault } from "svelte/legacy";
   import MuiIcon from "./MuiIcon.svelte";
 
   let {
@@ -26,8 +25,17 @@
   let text = $state("");
   let label = $state("");
   $effect(() => {
-    if (!selected) return;
-    if (!isEdit) return;
+    isModalOpen;
+    if (!selected) {
+      text = "";
+      label = "";
+      return;
+    }
+    if (!isEdit) {
+      text = "";
+      label = "";
+      return;
+    }
     text = selected.text;
     label = selected.label;
     number = selected.number;
@@ -35,13 +43,11 @@
 
   const close = () => {
     isModalOpen = false;
-    text = "";
-    label = "";
   };
 </script>
 
 <dialog class="modal" open={isModalOpen} onclose={close}>
-  <div class="modal-box">
+  <div class="modal-box max-w-full lg:w-1/2">
     <div class="mb-4 text-lg font-bold">Добавить куплет</div>
 
     <button
@@ -56,16 +62,32 @@
         <div class="label pt-0">
           <span class="label-text">Тип</span>
         </div>
-        <input
-          type="text"
-          placeholder="Тип куплета"
-          class="input input-bordered w-full"
-          value={label}
-          onchange={(e) => {
-            label = e.currentTarget.value;
-            e.stopPropagation();
-          }}
-        />
+        <div class="flex gap-2">
+          <input
+            bind:value={label}
+            type="text"
+            placeholder="Тип куплета"
+            class="input input-bordered w-full"
+            onkeydown={(e) => {
+              if (e.code === "Escape") {
+                close();
+              }
+              e.stopPropagation();
+            }}
+          />
+          <button
+            class="btn btn-outline btn-secondary"
+            onclick={() => (label = "Куплет")}>Куплет</button
+          >
+          <button
+            class="btn btn-outline btn-secondary"
+            onclick={() => (label = "Припев")}>Припев</button
+          >
+          <button
+            class="btn btn-outline btn-secondary"
+            onclick={() => (label = "Бридж")}>Бридж</button
+          >
+        </div>
       </label>
 
       <label class="form-control">
@@ -73,15 +95,17 @@
           <span class="label-text">Текст</span>
         </div>
         <textarea
-          class="textarea textarea-bordered h-24"
+          bind:value={text}
+          class="textarea textarea-bordered"
           placeholder="Bio"
-          rows="6"
-          onchange={(e) => {
-            text = e.currentTarget.value;
+          rows="8"
+          onkeydown={(e) => {
+            if (e.code === "Escape") {
+              close();
+            }
             e.stopPropagation();
           }}
         >
-          {text}
         </textarea>
       </label>
 

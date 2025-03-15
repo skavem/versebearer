@@ -72,12 +72,6 @@
         onclick={async () => {
           if (activeCoupletInd === 0 || !couplets.active) return;
           const prevCouplet = couplets.list.at(activeCoupletInd - 1)!;
-          console.log(
-            prevCouplet.text,
-            couplets.active.number,
-            couplets.active.text,
-            prevCouplet.number,
-          );
           await UpdateCouplet(
             prevCouplet.ID,
             prevCouplet.label,
@@ -101,12 +95,6 @@
           if (activeCoupletInd === couplets.list.length - 1 || !couplets.active)
             return;
           const nextCouplet = couplets.list.at(activeCoupletInd + 1)!;
-          console.log(
-            nextCouplet.text,
-            couplets.active.number,
-            couplets.active.text,
-            nextCouplet.number,
-          );
           await UpdateCouplet(
             nextCouplet.ID,
             nextCouplet.label,
@@ -155,7 +143,7 @@
 </div>
 
 <button
-  class="hover:border-black/40 flex w-full flex-row items-center justify-center gap-2 rounded border-2 border-zinc-100 p-2"
+  class="flex w-full flex-row items-center justify-center gap-2 rounded border-2 border-zinc-100 p-2 hover:border-black/40"
   onclick={() => {
     isEditMode = false;
     isModalOpen = true;
