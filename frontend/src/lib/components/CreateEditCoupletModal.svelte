@@ -5,6 +5,7 @@
     UpdateCouplet,
   } from "$lib/bindings/changeme/dbhandler";
   import { songsStore } from "$lib/stores/songsStore.svelte";
+  import { preventDefault } from "svelte/legacy";
   import MuiIcon from "./MuiIcon.svelte";
 
   let {
@@ -56,10 +57,14 @@
           <span class="label-text">Тип</span>
         </div>
         <input
-          bind:value={label}
           type="text"
           placeholder="Тип куплета"
           class="input input-bordered w-full"
+          value={label}
+          onchange={(e) => {
+            label = e.currentTarget.value;
+            e.stopPropagation();
+          }}
         />
       </label>
 
@@ -70,9 +75,13 @@
         <textarea
           class="textarea textarea-bordered h-24"
           placeholder="Bio"
-          bind:value={text}
           rows="6"
+          onchange={(e) => {
+            text = e.currentTarget.value;
+            e.stopPropagation();
+          }}
         >
+          {text}
         </textarea>
       </label>
 

@@ -326,6 +326,15 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 		SongId: songId,
 	}
 
+	if err := inits.DB.Model(&models.Couplet{}).Where(
+		"number >= ?", number,
+	).Update(
+		"number", gorm.Expr("number + 1"),
+	).Error; err != nil {
+		log.Println("Error updating couplet numbers", err.Error())
+		return
+	}
+
 	if err := inits.DB.Create(&couplet).Error; err != nil {
 		log.Println("Error creating couplet", err.Error())
 	}
@@ -368,9 +377,8 @@ func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, numb
 
 func (g *DbHandler) RemoveCouplet(coupletId int) {
 	couplet := models.Couplet{}
-	err := inits.DB.Find(&couplet, coupletId).Error
-	if err != nil {
-		log.Println("Error deleting couplet", err.Error())
+	if err := inits.DB.Find(&couplet, coupletId).Error; err != nil {
+		log.Println("Error finding couplet", err.Error())
 		return
 	}
 
@@ -383,6 +391,13 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 	if err := inits.DB.Preload("Couplets", addAscByNumber).Find(&song, couplet.SongId).Error; err != nil {
 		log.Println("Error getting new song state", err.Error())
 		return
+	}
+	for i, c := range song.Couplets {
+		c.Number = i + 1
+		if err := inits.DB.Save(&c).Error; err != nil {
+			log.Println("Error updating couplet number", err.Error())
+			return
+		}
 	}
 	g.app.EmitEvent("song_update", song)
 }
