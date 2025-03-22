@@ -12,7 +12,7 @@
 
   let shown = $derived(songsStore.couplets.shown);
   let couplets = $derived(songsStore.couplets);
-  let activeCoupletInd = $derived.by(() =>
+  let activeInd = $derived.by(() =>
     couplets.list.findIndex((v) => v.ID === couplets.active?.ID),
   );
 
@@ -68,10 +68,10 @@
     <div class="my-auto flex flex-col gap-2">
       <button
         class="btn btn-neutral btn-sm btn-square"
-        disabled={activeCoupletInd <= 0}
+        disabled={activeInd <= 0}
         onclick={async () => {
-          if (activeCoupletInd === 0 || !couplets.active) return;
-          const prevCouplet = couplets.list.at(activeCoupletInd - 1)!;
+          if (activeInd === 0 || !couplets.active) return;
+          const prevCouplet = couplets.list.at(activeInd - 1)!;
           await UpdateCouplet(
             prevCouplet.ID,
             prevCouplet.label,
@@ -90,11 +90,11 @@
       </button>
       <button
         class="btn btn-neutral btn-sm btn-square"
-        disabled={activeCoupletInd === couplets.list.length - 1}
+        disabled={activeInd === couplets.list.length - 1}
         onclick={async () => {
-          if (activeCoupletInd === couplets.list.length - 1 || !couplets.active)
+          if (activeInd === couplets.list.length - 1 || !couplets.active)
             return;
-          const nextCouplet = couplets.list.at(activeCoupletInd + 1)!;
+          const nextCouplet = couplets.list.at(activeInd + 1)!;
           await UpdateCouplet(
             nextCouplet.ID,
             nextCouplet.label,

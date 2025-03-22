@@ -16,11 +16,20 @@
     ondblclick?: MouseEventHandler<HTMLDivElement> | null;
     verse: Verse;
   } = $props();
+
+  let outerDiv = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (isActive && outerDiv) {
+      outerDiv.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={outerDiv}
   class={[
     "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
     !isActive && "border-transparent",

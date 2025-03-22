@@ -11,14 +11,14 @@
     onDoubleClick?: (v: Verse) => void;
   } = $props();
 
+  let shown = $derived(BibleStore.verses.shown);
   let verses = $derived(BibleStore.verses.list);
   let active = $derived(BibleStore.verses.active);
-  let shown = $derived(BibleStore.verses.shown);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="group/list flex-grow h-0 select-none overflow-y-scroll border-2 border-zinc-100"
+  class="group/list h-0 flex-grow select-none overflow-y-scroll border-2 border-zinc-100"
   onkeydown={(e) => {
     if (
       ["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].indexOf(
