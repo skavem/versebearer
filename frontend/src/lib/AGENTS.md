@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-22 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
 
 # lib
 
@@ -11,6 +11,7 @@ Shared frontend code accessed via `$lib/...`. Holds reusable Svelte components, 
 |------|-------------|
 | `index.ts` | Placeholder barrel — empty |
 | `MaterialIcons-Regular.woff2` | Local Material Icons font, referenced by `app.css` `@font-face` |
+| `songText.ts` | Plain-text ↔ couplet-list converter used by the whole-song edit modal. `serializeSongText` joins blocks via `\n\n` with label as first line; `parseSongText` trims each line, collapses any run of 2+ blank lines to a single separator, drops trailing blanks, splits blocks on blank lines, takes first line as `label` and the rest joined by `\n` as `text`. Empty blocks (zero non-empty lines) are dropped — that's the only filtering; label-only blocks with empty text are kept on purpose (per spec: do not block save) |
 
 ## Subdirectories
 | Directory | Purpose |

@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
 
 # routes
 
@@ -28,6 +28,7 @@ SvelteKit routes. The whole operator app lives at `/`, with three tab views impo
 - Components consume stores via `$derived(<storeName>.somePart)` and call `.active = item` setters that internally trigger fetches.
 - Backend calls (e.g. `ShowVerse`, `HideCouplet`) are imported directly from generated bindings — there's no service-layer abstraction.
 - `Songs.svelte` owns a local `songToDelete` `$state` for the delete confirmation modal — clicking the red trash button in the song list opens it; confirming calls `RemoveSong(id)`. The active-song fallback (previous → next → null) is computed **before** awaiting the backend so the store's `songs.list` setter preserves the choice when the `songs_update` event fires.
+- `Songs.svelte` also owns a local `isEditSongTextOpen` `$state` driving `EditSongTextModal`. The button sits in the bottom action bar (after Показать/Скрыть + QR), disabled when there is no active song. The modal wipes-and-recreates couplets via `ReplaceCouplets` — the active couplet will reset to the first new one because all IDs change.
 
 ## Dependencies
 

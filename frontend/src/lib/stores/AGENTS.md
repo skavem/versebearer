@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23c -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23d -->
 
 # stores
 
@@ -25,6 +25,7 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 - `songsStore.songs.list` setter preserves the current `active` when the song still exists in the new list (so `songs_update` from create/delete does not clobber the user's selection). It also drops `favorites` entries whose underlying song was deleted. `songs.active` setter is null-safe (passing `null` clears couplets without firing `GetCouplets`).
 - Callsites pre-select the next active BEFORE awaiting `RemoveSong`/`CreateSong`: `Songs.svelte#confirmDelete` picks `list[idx-1] ?? list[idx+1]` when the active song is the one being removed; `CreateSongModal#submit` sets `songs.active = created` after the call. The setter then keeps that choice when `songs_update` arrives.
 - Wails event names from `dbHandler.go` (`show_verse`, `hide_verse`, `show_couplet`, `hide_couplet`, `songs_update`, `song_update`) — keep in sync with the Go side.
+- `ReplaceCouplets` (whole-song bulk edit) hits the same `song_update` handler. Since every couplet ID changes, the `activeCouplet` ID won't be found in the new list and falls back to the first couplet — that's expected. The backend also calls `hideCouplet` before the wipe if the shown couplet belonged to the same song, so `shownCouplet` clears via the `hide_couplet` event.
 - `Events.On("show_verse", ({ data }: { data: ShownVerse }) => ...)` — Wails v3 `Event.Emit(name, single)` delivers `data` as the value itself (no array wrap). If backend emits multiple args (`Emit(name, a, b)`), `data` is `[a, b]`.
 
 ### Common Patterns

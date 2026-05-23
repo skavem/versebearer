@@ -25,6 +25,11 @@ type ShownCouplet struct {
 	Song models.Song
 }
 
+type CoupletInput struct {
+	Label string `json:"label"`
+	Text  string `json:"text"`
+}
+
 type DbHandler struct {
 	verseB   *broadcaster[ShownVerse]
 	coupletB *broadcaster[ShownCouplet]
@@ -388,6 +393,47 @@ func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, numb
 	}
 
 	g.emit("song_update", song)
+}
+
+func (g *DbHandler) ReplaceCouplets(songId int, blocks []CoupletInput) {
+	song := models.Song{}
+	if err := inits.DB.Find(&song, songId).Error; err != nil {
+		log.Println("Error finding song", err.Error())
+		return
+	}
+
+	if g.coupletB.state != nil && g.coupletB.state.Song.ID == uint(songId) {
+		g.hideCoupletInternal()
+	}
+
+	err := inits.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
+			return err
+		}
+		for i, b := range blocks {
+			c := models.Couplet{
+				Text:   b.Text,
+				Label:  b.Label,
+				Number: i + 1,
+				SongId: uint(songId),
+			}
+			if err := tx.Create(&c).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Println("Error replacing couplets", err.Error())
+		return
+	}
+
+	updatedSong := models.Song{}
+	if err := inits.DB.Preload("Couplets", addAscByNumber).Find(&updatedSong, songId).Error; err != nil {
+		log.Println("Error getting updated song", err.Error())
+		return
+	}
+	g.emit("song_update", updatedSong)
 }
 
 func (g *DbHandler) RemoveCouplet(coupletId int) {

@@ -9,6 +9,7 @@
   } from "$lib/bindings/changeme/dbhandler";
   import CoupletsList from "$lib/components/CoupletsList.svelte";
   import CreateSongModal from "$lib/components/CreateSongModal.svelte";
+  import EditSongTextModal from "$lib/components/EditSongTextModal.svelte";
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import Select from "$lib/components/Select.svelte";
@@ -21,6 +22,7 @@
   const favorites = $derived(songsStore.favorites);
 
   let songToDelete = $state<Song | null>(null);
+  let isEditSongTextOpen = $state(false);
 
   const confirmDelete = async () => {
     if (!songToDelete) return;
@@ -152,6 +154,15 @@
         >
           <MuiIcon name="qr_code" />
         </button>
+
+        <button
+          class="btn btn-square btn-outline btn-neutral"
+          disabled={!songs.active}
+          onclick={() => (isEditSongTextOpen = true)}
+          title="Редактировать всю песню"
+        >
+          <MuiIcon name="lyrics" />
+        </button>
       </div>
     </div>
 
@@ -205,6 +216,8 @@
     </div>
   </div>
 </div>
+
+<EditSongTextModal bind:isModalOpen={isEditSongTextOpen} />
 
 {#if songToDelete}
   <div class="modal modal-open">

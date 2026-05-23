@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
 
 # components
 
@@ -19,6 +19,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 | `SongsSelect.svelte` | Thin wrapper over `Select.svelte` for songs (display `"<number> - <title>"`, search by both) |
 | `CreateSongModal.svelte` | Modal: number (auto-incremented from last) + title → `CreateSong`. Sets the returned song as active so the list scrolls to it |
 | `CreateEditCoupletModal.svelte` | Modal for both create and edit. Quick-fill buttons "Куплет"/"Припев"/"Бридж" for the label |
+| `EditSongTextModal.svelte` | Whole-song bulk-edit modal: textarea showing all couplets serialized via `$lib/songText#serializeSongText` (label-then-text, blocks separated by blank line). Save parses the text via `parseSongText` and calls `ReplaceCouplets(songId, blocks)` which atomically wipes and recreates the song's couplets |
 | `ScreenToggler.svelte` | Button per OS display. Toggles a `ShowScreen`/`CloseScreen` pair; uses `screen <ID>` as window name |
 | `MuiIcon.svelte` | Renders a `<span class="material-icons">` with a typed `name` prop |
 | `MuiIcon.ts` | `const iconNames = [...] as const; export type MuiIconNames = (typeof iconNames)[number]` — huge string literal union of valid icon names |
