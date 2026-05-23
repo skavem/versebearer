@@ -2,6 +2,7 @@
   import Bible from "./Bible.svelte";
   import Screens from "./Screens.svelte";
   import Songs from "./Songs.svelte";
+  import Visual from "./Visual.svelte";
 
   const tabs = [
     {
@@ -15,6 +16,10 @@
     {
       name: "Экраны",
       component: Screens,
+    },
+    {
+      name: "Визуал",
+      component: Visual,
     },
   ];
   let activeTabIndex = $state(1);

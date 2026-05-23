@@ -1,10 +1,19 @@
 <script lang="ts">
   import QrCode from "@castlenine/svelte-qrcode";
   import { fade, fly } from "svelte/transition";
-  import type { IShownCouplet } from "../../types";
+  import type { IShownCouplet, IVisualStyle } from "../../types";
 
-  let { couplet, qr }: { couplet: IShownCouplet | null; qr: boolean } =
-    $props();
+  let {
+    couplet,
+    qr,
+    style,
+    fonts,
+  }: {
+    couplet: IShownCouplet | null;
+    qr: boolean;
+    style: IVisualStyle;
+    fonts: { ID: number; name: string; mimeType: string }[];
+  } = $props();
 
   let innerDiv = $state<null | HTMLDivElement>(null);
   let coupletDiv = $state<null | HTMLDivElement>(null);
@@ -43,13 +52,42 @@
       size--;
     }
   });
+
+  function hexToRgba(hex: string, opacity: number): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+
+  function fontFamily(style: IVisualStyle, fonts: { ID: number; name: string }[]): string {
+    if (style.fontId == null) return '"Century Gothic"';
+    const f = fonts.find((x) => x.ID === style.fontId);
+    return f ? `"${f.name}", "Century Gothic"` : '"Century Gothic"';
+  }
 </script>
 
 {#if couplet}
   <div class="outer" transition:fade={{ duration: 600 }}>
-    <div class="inner" bind:this={innerDiv}>
+    <div
+      class="inner"
+      bind:this={innerDiv}
+      style:background-color={hexToRgba(style.bgColor, style.bgOpacity)}
+      style:border-color={style.borderColor}
+      style:border-width="{style.borderWidth}px"
+      style:border-radius="{style.borderRadius}px"
+      style:border-style={style.borderStyle}
+      style:padding="{style.padding}px"
+    >
       {#key couplet.text}
-        <div bind:this={coupletDiv} class="text" in:fly={{ y: 20 }}>
+        <div
+          bind:this={coupletDiv}
+          class="text"
+          in:fly={{ y: 20 }}
+          style:color={style.textColor}
+          style:font-family={fontFamily(style, fonts)}
+          style:text-shadow={style.textShadow || "none"}
+        >
           {couplet.text}
         </div>
       {/key}
@@ -86,13 +124,10 @@
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    padding: 4rem;
     box-sizing: border-box;
 
     height: 100%;
     width: 100%;
-
-    background-color: rgb(0 0 0 / 95%);
   }
 
   .text {
@@ -100,8 +135,6 @@
     text-wrap: wrap;
     text-align: center;
     font-weight: 700;
-    color: white;
-    font-family: "Century Gothic";
     box-sizing: border-box;
   }
 

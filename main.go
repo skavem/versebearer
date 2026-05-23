@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 
+	"changeme/backend/inits"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -14,9 +16,10 @@ import (
 var assets embed.FS
 
 func main() {
-	bibleChannel, songChannel, qrChannel := createChannels()
+	bibleChannel, songChannel, qrChannel, styleChannel := createChannels()
 	dbHandler := DbHandler{
-		qr: qrChannel,
+		qr:     qrChannel,
+		styleB: styleChannel,
 	}
 	dbHandler.verseB = &broadcaster[ShownVerse]{
 		ch:      bibleChannel,
@@ -30,7 +33,7 @@ func main() {
 		hideEvt: "hide_couplet",
 		emit:    dbHandler.emit,
 	}
-	go createSSE(bibleChannel, songChannel, qrChannel)
+	go createSSE(bibleChannel, songChannel, qrChannel, styleChannel, inits.DB)
 
 	app := application.New(application.Options{
 		Name:        "versebearer",

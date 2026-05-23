@@ -13,6 +13,69 @@ import (
 
 const mainWindowName = "VerseBearer"
 
+type StyleEvent struct {
+	Type   string         `json:"type"`
+	Target string         `json:"target,omitempty"`
+	Style  map[string]any `json:"style,omitempty"`
+	Fonts  []models.Font  `json:"fonts,omitempty"`
+}
+
+type StyleInput struct {
+	BgColor      *string  `json:"bgColor"`
+	BgOpacity    *float64 `json:"bgOpacity"`
+	TextColor    *string  `json:"textColor"`
+	FontId       *uint    `json:"fontId"`
+	BorderColor  *string  `json:"borderColor"`
+	BorderWidth  *int     `json:"borderWidth"`
+	BorderRadius *int     `json:"borderRadius"`
+	BorderStyle  *string  `json:"borderStyle"`
+	Padding      *int     `json:"padding"`
+	TextShadow   *string  `json:"textShadow"`
+}
+
+type VisualStyle struct {
+	BgColor      string  `json:"bgColor"`
+	BgOpacity    float64 `json:"bgOpacity"`
+	TextColor    string  `json:"textColor"`
+	FontId       *uint   `json:"fontId"`
+	BorderColor  string  `json:"borderColor"`
+	BorderWidth  int     `json:"borderWidth"`
+	BorderRadius int     `json:"borderRadius"`
+	BorderStyle  string  `json:"borderStyle"`
+	Padding      int     `json:"padding"`
+	TextShadow   string  `json:"textShadow"`
+}
+
+type VisualSettings struct {
+	VerseStyle   VisualStyle   `json:"verseStyle"`
+	CoupletStyle VisualStyle   `json:"coupletStyle"`
+	Fonts        []models.Font `json:"fonts"`
+}
+
+var DefaultVerseStyle = VisualStyle{
+	BgColor:      "#000000",
+	BgOpacity:    0.95,
+	TextColor:    "#ffffff",
+	BorderColor:  "#000000",
+	BorderWidth:  0,
+	BorderRadius: 16,
+	BorderStyle:  "solid",
+	Padding:      32,
+	TextShadow:   "",
+}
+
+var DefaultCoupletStyle = VisualStyle{
+	BgColor:      "#000000",
+	BgOpacity:    0.95,
+	TextColor:    "#ffffff",
+	BorderColor:  "#000000",
+	BorderWidth:  0,
+	BorderRadius: 0,
+	BorderStyle:  "solid",
+	Padding:      64,
+	TextShadow:   "",
+}
+
 type ShownVerse struct {
 	models.Verse
 	Book        models.Book
@@ -34,7 +97,8 @@ type DbHandler struct {
 	verseB   *broadcaster[ShownVerse]
 	coupletB *broadcaster[ShownCouplet]
 
-	qr chan *bool
+	qr     chan *bool
+	styleB chan *StyleEvent
 
 	app *application.App
 }
@@ -532,4 +596,321 @@ func (g *DbHandler) CloseScreen(name string) {
 		return
 	}
 	s.Close()
+}
+
+// --- Visual / style handlers ---
+
+func visualStyleFromGS(gs models.GlobalState, target string) VisualStyle {
+	if target == "verse" {
+		return VisualStyle{
+			BgColor:      gs.VerseBgColor,
+			BgOpacity:    gs.VerseBgOpacity,
+			TextColor:    gs.VerseTextColor,
+			FontId:       gs.VerseFontId,
+			BorderColor:  gs.VerseBorderColor,
+			BorderWidth:  gs.VerseBorderWidth,
+			BorderRadius: gs.VerseBorderRadius,
+			BorderStyle:  gs.VerseBorderStyle,
+			Padding:      gs.VersePadding,
+			TextShadow:   gs.VerseTextShadow,
+		}
+	}
+	return VisualStyle{
+		BgColor:      gs.CoupletBgColor,
+		BgOpacity:    gs.CoupletBgOpacity,
+		TextColor:    gs.CoupletTextColor,
+		FontId:       gs.CoupletFontId,
+		BorderColor:  gs.CoupletBorderColor,
+		BorderWidth:  gs.CoupletBorderWidth,
+		BorderRadius: gs.CoupletBorderRadius,
+		BorderStyle:  gs.CoupletBorderStyle,
+		Padding:      gs.CoupletPadding,
+		TextShadow:   gs.CoupletTextShadow,
+	}
+}
+
+func (g *DbHandler) GetVisualSettings() VisualSettings {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("GetVisualSettings: error reading GlobalState", err)
+	}
+	var fonts []models.Font
+	inits.DB.Find(&fonts)
+	return VisualSettings{
+		VerseStyle:   visualStyleFromGS(gs, "verse"),
+		CoupletStyle: visualStyleFromGS(gs, "couplet"),
+		Fonts:        fonts,
+	}
+}
+
+func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("UpdateVerseStyle: error reading GlobalState", err)
+		return visualStyleFromGS(gs, "verse")
+	}
+	updates := map[string]any{}
+	if input.BgColor != nil {
+		gs.VerseBgColor = *input.BgColor
+		updates["verse_bg_color"] = *input.BgColor
+	}
+	if input.BgOpacity != nil {
+		gs.VerseBgOpacity = *input.BgOpacity
+		updates["verse_bg_opacity"] = *input.BgOpacity
+	}
+	if input.TextColor != nil {
+		gs.VerseTextColor = *input.TextColor
+		updates["verse_text_color"] = *input.TextColor
+	}
+	if input.FontId != nil {
+		gs.VerseFontId = input.FontId
+		updates["verse_font_id"] = input.FontId
+	}
+	if input.BorderColor != nil {
+		gs.VerseBorderColor = *input.BorderColor
+		updates["verse_border_color"] = *input.BorderColor
+	}
+	if input.BorderWidth != nil {
+		gs.VerseBorderWidth = *input.BorderWidth
+		updates["verse_border_width"] = *input.BorderWidth
+	}
+	if input.BorderRadius != nil {
+		gs.VerseBorderRadius = *input.BorderRadius
+		updates["verse_border_radius"] = *input.BorderRadius
+	}
+	if input.BorderStyle != nil {
+		gs.VerseBorderStyle = *input.BorderStyle
+		updates["verse_border_style"] = *input.BorderStyle
+	}
+	if input.Padding != nil {
+		gs.VersePadding = *input.Padding
+		updates["verse_padding"] = *input.Padding
+	}
+	if input.TextShadow != nil {
+		gs.VerseTextShadow = *input.TextShadow
+		updates["verse_text_shadow"] = *input.TextShadow
+	}
+	if len(updates) > 0 {
+		if err := inits.DB.Model(&gs).Updates(updates).Error; err != nil {
+			log.Println("UpdateVerseStyle: error saving", err)
+		}
+	}
+	style := visualStyleFromGS(gs, "verse")
+	styleMap := map[string]any{
+		"bgColor": style.BgColor, "bgOpacity": style.BgOpacity,
+		"textColor": style.TextColor, "fontId": style.FontId,
+		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
+		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
+		"padding": style.Padding, "textShadow": style.TextShadow,
+	}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
+	return style
+}
+
+func (g *DbHandler) UpdateCoupletStyle(input StyleInput) VisualStyle {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("UpdateCoupletStyle: error reading GlobalState", err)
+		return visualStyleFromGS(gs, "couplet")
+	}
+	updates := map[string]any{}
+	if input.BgColor != nil {
+		gs.CoupletBgColor = *input.BgColor
+		updates["couplet_bg_color"] = *input.BgColor
+	}
+	if input.BgOpacity != nil {
+		gs.CoupletBgOpacity = *input.BgOpacity
+		updates["couplet_bg_opacity"] = *input.BgOpacity
+	}
+	if input.TextColor != nil {
+		gs.CoupletTextColor = *input.TextColor
+		updates["couplet_text_color"] = *input.TextColor
+	}
+	if input.FontId != nil {
+		gs.CoupletFontId = input.FontId
+		updates["couplet_font_id"] = input.FontId
+	}
+	if input.BorderColor != nil {
+		gs.CoupletBorderColor = *input.BorderColor
+		updates["couplet_border_color"] = *input.BorderColor
+	}
+	if input.BorderWidth != nil {
+		gs.CoupletBorderWidth = *input.BorderWidth
+		updates["couplet_border_width"] = *input.BorderWidth
+	}
+	if input.BorderRadius != nil {
+		gs.CoupletBorderRadius = *input.BorderRadius
+		updates["couplet_border_radius"] = *input.BorderRadius
+	}
+	if input.BorderStyle != nil {
+		gs.CoupletBorderStyle = *input.BorderStyle
+		updates["couplet_border_style"] = *input.BorderStyle
+	}
+	if input.Padding != nil {
+		gs.CoupletPadding = *input.Padding
+		updates["couplet_padding"] = *input.Padding
+	}
+	if input.TextShadow != nil {
+		gs.CoupletTextShadow = *input.TextShadow
+		updates["couplet_text_shadow"] = *input.TextShadow
+	}
+	if len(updates) > 0 {
+		if err := inits.DB.Model(&gs).Updates(updates).Error; err != nil {
+			log.Println("UpdateCoupletStyle: error saving", err)
+		}
+	}
+	style := visualStyleFromGS(gs, "couplet")
+	styleMap := map[string]any{
+		"bgColor": style.BgColor, "bgOpacity": style.BgOpacity,
+		"textColor": style.TextColor, "fontId": style.FontId,
+		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
+		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
+		"padding": style.Padding, "textShadow": style.TextShadow,
+	}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
+	return style
+}
+
+func (g *DbHandler) ResetVerseStyle() VisualStyle {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("ResetVerseStyle: error reading GlobalState", err)
+	}
+	d := DefaultVerseStyle
+	if err := inits.DB.Model(&gs).Updates(map[string]any{
+		"verse_bg_color":      d.BgColor,
+		"verse_bg_opacity":    d.BgOpacity,
+		"verse_text_color":    d.TextColor,
+		"verse_font_id":       nil,
+		"verse_border_color":  d.BorderColor,
+		"verse_border_width":  d.BorderWidth,
+		"verse_border_radius": d.BorderRadius,
+		"verse_border_style":  d.BorderStyle,
+		"verse_padding":       d.Padding,
+		"verse_text_shadow":   d.TextShadow,
+	}).Error; err != nil {
+		log.Println("ResetVerseStyle: error saving", err)
+	}
+	styleMap := map[string]any{
+		"bgColor": d.BgColor, "bgOpacity": d.BgOpacity,
+		"textColor": d.TextColor, "fontId": (*uint)(nil),
+		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
+		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
+		"padding": d.Padding, "textShadow": d.TextShadow,
+	}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
+	return d
+}
+
+func (g *DbHandler) ResetCoupletStyle() VisualStyle {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("ResetCoupletStyle: error reading GlobalState", err)
+	}
+	d := DefaultCoupletStyle
+	if err := inits.DB.Model(&gs).Updates(map[string]any{
+		"couplet_bg_color":      d.BgColor,
+		"couplet_bg_opacity":    d.BgOpacity,
+		"couplet_text_color":    d.TextColor,
+		"couplet_font_id":       nil,
+		"couplet_border_color":  d.BorderColor,
+		"couplet_border_width":  d.BorderWidth,
+		"couplet_border_radius": d.BorderRadius,
+		"couplet_border_style":  d.BorderStyle,
+		"couplet_padding":       d.Padding,
+		"couplet_text_shadow":   d.TextShadow,
+	}).Error; err != nil {
+		log.Println("ResetCoupletStyle: error saving", err)
+	}
+	styleMap := map[string]any{
+		"bgColor": d.BgColor, "bgOpacity": d.BgOpacity,
+		"textColor": d.TextColor, "fontId": (*uint)(nil),
+		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
+		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
+		"padding": d.Padding, "textShadow": d.TextShadow,
+	}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
+	return d
+}
+
+func (g *DbHandler) UploadFont(name, mimeType string, data []byte) *models.Font {
+	if len(data) > 5*1024*1024 {
+		log.Println("UploadFont: file too large", len(data))
+		return nil
+	}
+	validMimes := map[string]bool{
+		"font/woff2":                  true,
+		"font/ttf":                    true,
+		"application/font-woff2":      true,
+		"application/x-font-ttf":      true,
+		"application/octet-stream":    true,
+	}
+	if !validMimes[mimeType] {
+		log.Println("UploadFont: invalid mime type", mimeType)
+		return nil
+	}
+	font := models.Font{
+		Name:      name,
+		MimeType:  mimeType,
+		Data:      data,
+		SizeBytes: len(data),
+	}
+	if err := inits.DB.Create(&font).Error; err != nil {
+		log.Println("UploadFont: error creating font", err)
+		return nil
+	}
+	var fonts []models.Font
+	inits.DB.Find(&fonts)
+	g.styleB <- &StyleEvent{Type: "fonts_changed", Fonts: fonts}
+	return &font
+}
+
+func (g *DbHandler) DeleteFont(idF float32) {
+	id := uint(idF)
+	if err := inits.DB.Delete(&models.Font{}, id).Error; err != nil {
+		log.Println("DeleteFont: error deleting font", err)
+		return
+	}
+	// Null out any style FK pointing to this font
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err == nil {
+		updates := map[string]any{}
+		if gs.VerseFontId != nil && *gs.VerseFontId == id {
+			updates["verse_font_id"] = nil
+		}
+		if gs.CoupletFontId != nil && *gs.CoupletFontId == id {
+			updates["couplet_font_id"] = nil
+		}
+		if len(updates) > 0 {
+			inits.DB.Model(&gs).Updates(updates)
+			inits.DB.First(&gs, 1)
+			verseMap := map[string]any{
+				"bgColor": gs.VerseBgColor, "bgOpacity": gs.VerseBgOpacity,
+				"textColor": gs.VerseTextColor, "fontId": gs.VerseFontId,
+				"borderColor": gs.VerseBorderColor, "borderWidth": gs.VerseBorderWidth,
+				"borderRadius": gs.VerseBorderRadius, "borderStyle": gs.VerseBorderStyle,
+				"padding": gs.VersePadding, "textShadow": gs.VerseTextShadow,
+			}
+			g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: verseMap}
+			coupletMap := map[string]any{
+				"bgColor": gs.CoupletBgColor, "bgOpacity": gs.CoupletBgOpacity,
+				"textColor": gs.CoupletTextColor, "fontId": gs.CoupletFontId,
+				"borderColor": gs.CoupletBorderColor, "borderWidth": gs.CoupletBorderWidth,
+				"borderRadius": gs.CoupletBorderRadius, "borderStyle": gs.CoupletBorderStyle,
+				"padding": gs.CoupletPadding, "textShadow": gs.CoupletTextShadow,
+			}
+			g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: coupletMap}
+		}
+	}
+	var fonts []models.Font
+	inits.DB.Find(&fonts)
+	g.styleB <- &StyleEvent{Type: "fonts_changed", Fonts: fonts}
+}
+
+func (g *DbHandler) getFontDataInternal(id uint) ([]byte, string, error) {
+	var f models.Font
+	if err := inits.DB.First(&f, id).Error; err != nil {
+		return nil, "", err
+	}
+	return f.Data, f.MimeType, nil
 }
