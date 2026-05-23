@@ -13,10 +13,15 @@
 
   let activeScreens = $derived(screenStore.activeScreens);
   let toggled = $derived(screenStore.activeScreens.includes(id));
+  let isCurrent = $derived(screenStore.currentScreenID === scr.ID);
 </script>
 
 <button
-  class={["btn btn-outline h-max p-2", toggled && "btn-active"]}
+  class={[
+    "btn btn-outline h-max p-2",
+    toggled && "btn-active",
+    isCurrent && "ring-2 ring-primary ring-offset-2",
+  ]}
   onclick={() => {
     if (!toggled) {
       const rect = scr.Bounds;

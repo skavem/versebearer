@@ -4,8 +4,10 @@ import (
 	"embed"
 	_ "embed"
 	"log"
+	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -46,7 +48,8 @@ func main() {
 
 	dbHandler.app = app
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:      mainWindowName,
 		Title:     "VerseBearer",
 		MinWidth:  900,
 		Width:     900,
@@ -59,6 +62,37 @@ func main() {
 		},
 		BackgroundColour: application.NewRGB(100, 100, 100),
 		URL:              "/",
+	})
+
+	var (
+		lastScreenMu sync.Mutex
+		lastScreenID string
+	)
+	mainWindow.RegisterHook(events.Common.WindowDidMove, func(_ *application.WindowEvent) {
+		go func() {
+			scr, err := mainWindow.GetScreen()
+			if err != nil || scr == nil {
+				return
+			}
+			lastScreenMu.Lock()
+			if scr.ID == lastScreenID {
+				lastScreenMu.Unlock()
+				return
+			}
+			lastScreenID = scr.ID
+			lastScreenMu.Unlock()
+			dbHandler.emit("current_screen", scr.ID)
+		}()
+	})
+
+	mainWindow.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
+		mainID := mainWindow.ID()
+		for _, w := range app.Window.GetAll() {
+			if w.ID() == mainID {
+				continue
+			}
+			w.Close()
+		}
 	})
 
 	err := app.Run()

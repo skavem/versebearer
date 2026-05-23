@@ -10,6 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const mainWindowName = "VerseBearer"
+
 type ShownVerse struct {
 	models.Verse
 	Book        models.Book
@@ -404,6 +406,21 @@ func (g *DbHandler) ShowQR() {
 func (g *DbHandler) HideQR() {
 	r := false
 	g.qr <- &r
+}
+
+func (g *DbHandler) GetCurrentScreenID() string {
+	if g.app == nil {
+		return ""
+	}
+	w, ok := g.app.Window.GetByName(mainWindowName)
+	if !ok {
+		return ""
+	}
+	scr, err := w.GetScreen()
+	if err != nil || scr == nil {
+		return ""
+	}
+	return scr.ID
 }
 
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
