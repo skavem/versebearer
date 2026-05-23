@@ -66,6 +66,12 @@ func addAscByNumber(db *gorm.DB) *gorm.DB {
 	return db.Order("couplets.number ASC")
 }
 
+func findByParent[T any](field string, parentId uint, order string) ([]T, error) {
+	var out []T
+	err := inits.DB.Where(field+" = ?", parentId).Order(order).Find(&out).Error
+	return out, err
+}
+
 func (g *DbHandler) GetTranslations() []models.Translation {
 	translations := []models.Translation{}
 	err := inits.DB.Find(&translations).Error
@@ -105,13 +111,7 @@ func (g *DbHandler) GetTranslations() []models.Translation {
 }
 
 func (g *DbHandler) getBooks(translationId uint) ([]models.Book, error) {
-	books := []models.Book{}
-	err := inits.DB.Order("number").Where("translation_id = ?", translationId).Find(&books).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return books, nil
+	return findByParent[models.Book]("translation_id", translationId, "number")
 }
 
 func (g *DbHandler) GetBooks(translationId float32) []models.Book {
@@ -143,13 +143,7 @@ func (g *DbHandler) GetBooks(translationId float32) []models.Book {
 }
 
 func (g *DbHandler) getChapters(bookId uint) ([]models.Chapter, error) {
-	chapters := []models.Chapter{}
-	err := inits.DB.Order("number").Where("book_id = ?", bookId).Find(&chapters).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return chapters, nil
+	return findByParent[models.Chapter]("book_id", bookId, "number")
 }
 
 func (g *DbHandler) GetChapters(bookId float32) []models.Chapter {
@@ -172,13 +166,7 @@ func (g *DbHandler) GetChapters(bookId float32) []models.Chapter {
 }
 
 func (g *DbHandler) getVerses(chapterId uint) ([]models.Verse, error) {
-	verses := []models.Verse{}
-	err := inits.DB.Order("number").Where("chapter_id = ?", chapterId).Find(&verses).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return verses, nil
+	return findByParent[models.Verse]("chapter_id", chapterId, "number")
 }
 
 func (g *DbHandler) GetVerses(chapterId float32) []models.Verse {
@@ -278,13 +266,7 @@ func (g *DbHandler) CreateSong(number int, title string) {
 }
 
 func (g *DbHandler) getCouplets(songId uint) ([]models.Couplet, error) {
-	couplets := []models.Couplet{}
-	err := inits.DB.Where("song_id = ?", songId).Order("number ASC").Find(&couplets).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return couplets, nil
+	return findByParent[models.Couplet]("song_id", songId, "number ASC")
 }
 
 func (g *DbHandler) GetCouplets(songId float32) []models.Couplet {
