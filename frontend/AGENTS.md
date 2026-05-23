@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-22 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
 
 # frontend
 
@@ -9,7 +9,7 @@ Operator UI. SvelteKit + Svelte 5 (runes) + Tailwind + DaisyUI. Static-adapter b
 ## Key Files
 | File | Description |
 |------|-------------|
-| `package.json` | Scripts: `dev`, `build`, `preview`, `check`. Deps: SvelteKit 2, Svelte 5, Tailwind 3, DaisyUI 4, `@wailsio/runtime` (alpha.29) |
+| `package.json` | Scripts: `dev`, `build`, `preview`, `check`. Deps: SvelteKit 2, Svelte 5, Tailwind 3, DaisyUI 4, `@wailsio/runtime` (alpha.79 — highest published; matches the Go `wails/v3` alpha.95 transport) |
 | `svelte.config.js` | Uses `@sveltejs/adapter-static` with output → `dist/` |
 | `vite.config.ts` | SvelteKit Vite plugin + workspace-root `fs.allow` for `bindings/*` |
 | `tailwind.config.js` | DaisyUI custom theme `mytheme` + project colors `seawave`/`sealight` |
@@ -50,6 +50,6 @@ Operator UI. SvelteKit + Svelte 5 (runes) + Tailwind + DaisyUI. Static-adapter b
 - Consumes Go bindings auto-generated into `src/lib/bindings/`.
 
 ### External
-- `@sveltejs/kit`, `@sveltejs/adapter-static`, `svelte` 5, `@wailsio/runtime` 3.0.0-alpha.29, `tailwindcss`, `daisyui`, `tailwind-merge`.
+- `@sveltejs/kit`, `@sveltejs/adapter-static`, `svelte` 5, `@wailsio/runtime` 3.0.0-alpha.79, `tailwindcss`, `daisyui`, `tailwind-merge`.
 
 <!-- MANUAL: -->

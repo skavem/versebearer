@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-22 | Updated: 2026-05-22 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
 
 # versebearer
 
@@ -30,8 +30,10 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 
 ### Working In This Directory
 - Module path is `changeme` — do not rename without updating every `changeme/...` import.
-- Three independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle). `DbHandler.showVerseInternal/hideVerseInternal/showCoupletInternal/hideCoupletInternal` are the only producers — they push to the channel AND `app.EmitEvent` for the Wails frontend in one step. Keep both sides in sync.
-- `main()` constructs channels and `DbHandler` *before* `application.New` then assigns `dbHandler.app = app` after — `app` is nil until then, so never call `EmitEvent` during construction.
+- Three independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle). `DbHandler.showVerseInternal/hideVerseInternal/showCoupletInternal/hideCoupletInternal` are the only producers — they push to the channel AND `app.Event.Emit` for the Wails frontend in one step. Keep both sides in sync.
+- `main()` constructs channels and `DbHandler` *before* `application.New` then assigns `dbHandler.app = app` after — `app` is nil until then, so never call `app.Event.Emit` during construction.
+- Wails v3 manager-pattern API in use: `app.Event` (`EventManager`), `app.Window` (`NewWithOptions` / `GetByName(name) (Window, bool)`). Do not revert to the pre-alpha.12 flat methods (`EmitEvent`, `NewWebviewWindowWithOptions`, `GetWindowByName`).
+- `app.Event.Emit(name, single)` sets the JS `data` to `single` directly. JS handlers read `({data}) => ...`, NOT `data[0]`. Backend code that emits two+ args produces a JS array.
 - New Wails-exposed methods on `DbHandler` need `wails3 generate bindings` (`task common:generate:bindings`) to refresh `frontend/src/lib/bindings/`.
 - SSE port `9093` is hardcoded in `SSE.go`. The projector windows open `http://localhost:9093` directly (`DbHandler.ShowScreen`).
 - `couplet.Number` is the order field. `CreateCouplet` shifts all `>=number` up by one before insert. `RemoveCouplet` re-numbers `1..n` after delete. `UpdateCouplet` does NOT renumber — UI swaps numbers pair-wise via two `UpdateCouplet` calls for reordering.
@@ -49,7 +51,7 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 ## Dependencies
 
 ### External (Go)
-- `github.com/wailsapp/wails/v3` v3.0.0-alpha.8.3 — desktop shell
+- `github.com/wailsapp/wails/v3` v3.0.0-alpha.95 — desktop shell. Requires Go toolchain ≥ 1.25 (auto-fetched via `go.mod` toolchain directive).
 - `gorm.io/gorm` + `gorm.io/driver/sqlite` — ORM + SQLite (uses `mattn/go-sqlite3` CGO driver)
 - `github.com/r3labs/sse/v2` — SSE server for reciever
 - `github.com/joho/godotenv` — `.env` loader
