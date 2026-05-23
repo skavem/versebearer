@@ -35,6 +35,11 @@ tasks:
     env:
       PRODUCTION: "false"
 
+  test:
+    summary: Runs Go unit tests (in-memory SQLite, no Wails/frontend deps)
+    cmds:
+      - go test ./...
+
   darwin:build:universal:
     summary: Builds darwin universal binary (arm64 + amd64)
     cmds:

@@ -42,7 +42,7 @@
           return;
         case "ArrowLeft":
           chapters.prev();
-          e.preventDefault;
+          e.preventDefault();
           return;
         case "ArrowRight":
           chapters.next();

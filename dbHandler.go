@@ -34,28 +34,34 @@ type DbHandler struct {
 	app *application.App
 }
 
+func (g *DbHandler) emit(name string, data any) {
+	if g.app != nil {
+		g.emit(name, data)
+	}
+}
+
 func (g *DbHandler) showVerseInternal(verse *ShownVerse) {
 	g.verse = verse
 	g.verseChannel <- verse
-	g.app.Event.Emit("show_verse", g.verse)
+	g.emit("show_verse", g.verse)
 }
 
 func (g *DbHandler) hideVerseInternal() {
 	g.verse = nil
 	g.verseChannel <- nil
-	g.app.Event.Emit("hide_verse", nil)
+	g.emit("hide_verse", nil)
 }
 
 func (g *DbHandler) showCoupletInternal(couplet *ShownCouplet) {
 	g.couplet = couplet
 	g.coupletChannel <- couplet
-	g.app.Event.Emit("show_couplet", g.couplet)
+	g.emit("show_couplet", g.couplet)
 }
 
 func (g *DbHandler) hideCoupletInternal() {
 	g.couplet = nil
 	g.coupletChannel <- nil
-	g.app.Event.Emit("hide_couplet", nil)
+	g.emit("hide_couplet", nil)
 }
 
 func addAscByNumber(db *gorm.DB) *gorm.DB {
@@ -270,7 +276,7 @@ func (g *DbHandler) CreateSong(number int, title string) {
 		songs[0].Couplets = firstSongCouplets
 	}
 
-	g.app.Event.Emit("songs_update", songs)
+	g.emit("songs_update", songs)
 }
 
 func (g *DbHandler) getCouplets(songId uint) ([]models.Couplet, error) {
@@ -327,7 +333,7 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 	}
 
 	if err := inits.DB.Model(&models.Couplet{}).Where(
-		"number >= ?", number,
+		"song_id = ? AND number >= ?", songId, number,
 	).Update(
 		"number", gorm.Expr("number + 1"),
 	).Error; err != nil {
@@ -345,7 +351,7 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 		log.Println("Error getting new song state", err.Error())
 		return
 	}
-	g.app.Event.Emit("song_update", song)
+	g.emit("song_update", song)
 }
 
 func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, number int) {
@@ -372,7 +378,7 @@ func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, numb
 		return
 	}
 
-	g.app.Event.Emit("song_update", song)
+	g.emit("song_update", song)
 }
 
 func (g *DbHandler) RemoveCouplet(coupletId int) {
@@ -399,7 +405,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 			return
 		}
 	}
-	g.app.Event.Emit("song_update", song)
+	g.emit("song_update", song)
 }
 
 func (g *DbHandler) GetShownCouplet() *ShownCouplet {
