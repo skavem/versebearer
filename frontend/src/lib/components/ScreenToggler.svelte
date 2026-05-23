@@ -1,45 +1,105 @@
 <script lang="ts">
-  import { CloseScreen, ShowScreen } from "$lib/bindings/changeme/dbhandler";
-  import { screenStore } from "$lib/stores/screenStore.svelte";
+  import { screenId, screenStore } from "$lib/stores/screenStore.svelte";
   import type { Screens } from "@wailsio/runtime";
   import MuiIcon from "./MuiIcon.svelte";
 
-  type screen = Screens.Screen;
+  type Screen = Screens.Screen;
 
-  const { scr } = $props<{
-    scr: screen;
+  const { scr, index } = $props<{
+    scr: Screen;
+    index: number;
   }>();
-  const id = `screen ${scr.ID}`;
+  const id = screenId(scr);
 
-  let activeScreens = $derived(screenStore.activeScreens);
-  let toggled = $derived(screenStore.activeScreens.includes(id));
-  let isCurrent = $derived(screenStore.currentScreenID === scr.ID);
+  const projecting = $derived(screenStore.activeScreens.includes(id));
+  const isCurrent = $derived(screenStore.currentScreenID === scr.ID);
+  const aspectRatio = $derived((scr.Bounds.Width / scr.Bounds.Height).toFixed(2));
+  const scalePct = $derived(Math.round(scr.ScaleFactor * 100));
 </script>
 
-<button
+<div
   class={[
-    "btn btn-outline h-max p-2",
-    toggled && "btn-active",
-    isCurrent && "ring-2 ring-primary ring-offset-2",
+    "card border bg-base-100 transition-all",
+    projecting ? "border-neutral shadow-md shadow-neutral/20" : "border-base-300",
+    isCurrent && "ring-2 ring-secondary ring-offset-2 ring-offset-base-100",
   ]}
-  onclick={() => {
-    if (!toggled) {
-      const rect = scr.Bounds;
-      ShowScreen(rect.X, rect.Y, rect.Width, rect.Height, id);
-      activeScreens.push(id);
-    } else {
-      CloseScreen(id);
-      screenStore.activeScreens = activeScreens.filter((s) => s !== id);
-    }
-  }}
 >
-  <div class="flex flex-col gap-1">
-    <MuiIcon name="monitor" style="font-size: 3rem" />
-    <div>Имя: {scr.Name.replace(/[\\\.]/g, "")}</div>
-    <div>ID: {scr.ID}</div>
-    <div>
-      X: {scr.Bounds.X}
-      Y: {scr.Bounds.Y}
+  <div class="card-body p-4">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div
+          class={[
+            "flex h-10 w-10 items-center justify-center rounded-lg",
+            projecting ? "bg-neutral text-neutral-content" : "bg-base-200",
+          ]}
+        >
+          <MuiIcon name="monitor" style="font-size: 1.5rem" />
+        </div>
+        <div>
+          <div class="text-lg font-bold leading-tight">
+            Монитор {index + 1}
+          </div>
+          <div class="text-xs leading-tight text-base-content/60">
+            {scr.Name.replace(/[\\.]/g, "")}
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col items-end gap-1">
+        {#if scr.IsPrimary}
+          <span class="badge badge-sm badge-ghost">Основной</span>
+        {/if}
+        {#if isCurrent}
+          <span class="badge badge-sm badge-secondary">Здесь</span>
+        {/if}
+        {#if projecting}
+          <span class="badge badge-sm badge-neutral">В эфире</span>
+        {/if}
+      </div>
     </div>
+
+    <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+      <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+          Разрешение
+        </span>
+        <span class="font-mono font-semibold">
+          {scr.Bounds.Width}×{scr.Bounds.Height}
+        </span>
+      </div>
+      <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+          Масштаб
+        </span>
+        <span class="font-mono font-semibold">{scalePct}%</span>
+      </div>
+      <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+          Позиция
+        </span>
+        <span class="font-mono font-semibold">
+          {scr.Bounds.X}, {scr.Bounds.Y}
+        </span>
+      </div>
+      <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <span class="text-[10px] uppercase tracking-wide text-base-content/50">
+          Соотношение
+        </span>
+        <span class="font-mono font-semibold">{aspectRatio}:1</span>
+      </div>
+    </div>
+
+    <button
+      onclick={() => screenStore.requestToggle(scr)}
+      class={[
+        "btn btn-sm mt-2 w-full",
+        projecting ? "btn-outline btn-error" : "btn-neutral",
+      ]}
+    >
+      <MuiIcon
+        name={projecting ? "cancel_presentation" : "present_to_all"}
+        style="font-size: 1.1rem"
+      />
+      {projecting ? "Остановить трансляцию" : "Транслировать"}
+    </button>
   </div>
-</button>
+</div>

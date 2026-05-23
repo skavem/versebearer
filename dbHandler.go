@@ -7,6 +7,7 @@ import (
 	"changeme/backend/models"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"gorm.io/gorm"
 )
 
@@ -426,7 +427,7 @@ func (g *DbHandler) GetCurrentScreenID() string {
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 	app := application.Get()
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:        name,
 		Title:       "VerseBearer - screen",
 		Frameless:   true,
@@ -440,8 +441,14 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
-		// URL: "/screen",
+		KeyBindings: map[string]func(application.Window){
+			"Escape": func(win application.Window) { win.Close() },
+		},
 		URL: "http://localhost:9093",
+	})
+
+	w.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
+		g.emit("screen_closed", name)
 	})
 }
 
