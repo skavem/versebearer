@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/joho/godotenv v1.5.1
-	github.com/wailsapp/wails/v3 v3.0.0-alpha.12
+	github.com/wailsapp/wails/v3 v3.0.0-alpha.30
 	gorm.io/driver/sqlite v1.5.7
 	gorm.io/gorm v1.25.12
 )
