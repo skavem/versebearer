@@ -37,25 +37,25 @@ type DbHandler struct {
 func (g *DbHandler) showVerseInternal(verse *ShownVerse) {
 	g.verse = verse
 	g.verseChannel <- verse
-	g.app.EmitEvent("show_verse", g.verse)
+	g.app.Event.Emit("show_verse", g.verse)
 }
 
 func (g *DbHandler) hideVerseInternal() {
 	g.verse = nil
 	g.verseChannel <- nil
-	g.app.EmitEvent("hide_verse", nil)
+	g.app.Event.Emit("hide_verse", nil)
 }
 
 func (g *DbHandler) showCoupletInternal(couplet *ShownCouplet) {
 	g.couplet = couplet
 	g.coupletChannel <- couplet
-	g.app.EmitEvent("show_couplet", g.couplet)
+	g.app.Event.Emit("show_couplet", g.couplet)
 }
 
 func (g *DbHandler) hideCoupletInternal() {
 	g.couplet = nil
 	g.coupletChannel <- nil
-	g.app.EmitEvent("hide_couplet", nil)
+	g.app.Event.Emit("hide_couplet", nil)
 }
 
 func addAscByNumber(db *gorm.DB) *gorm.DB {
@@ -270,7 +270,7 @@ func (g *DbHandler) CreateSong(number int, title string) {
 		songs[0].Couplets = firstSongCouplets
 	}
 
-	g.app.EmitEvent("songs_update", songs)
+	g.app.Event.Emit("songs_update", songs)
 }
 
 func (g *DbHandler) getCouplets(songId uint) ([]models.Couplet, error) {
@@ -345,7 +345,7 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 		log.Println("Error getting new song state", err.Error())
 		return
 	}
-	g.app.EmitEvent("song_update", song)
+	g.app.Event.Emit("song_update", song)
 }
 
 func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, number int) {
@@ -372,7 +372,7 @@ func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, numb
 		return
 	}
 
-	g.app.EmitEvent("song_update", song)
+	g.app.Event.Emit("song_update", song)
 }
 
 func (g *DbHandler) RemoveCouplet(coupletId int) {
@@ -399,7 +399,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 			return
 		}
 	}
-	g.app.EmitEvent("song_update", song)
+	g.app.Event.Emit("song_update", song)
 }
 
 func (g *DbHandler) GetShownCouplet() *ShownCouplet {
@@ -423,7 +423,7 @@ func (g *DbHandler) HideQR() {
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 	app := application.Get()
 
-	app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:        name,
 		Title:       "VerseBearer - screen",
 		Frameless:   true,
@@ -445,6 +445,9 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 func (g *DbHandler) CloseScreen(name string) {
 	app := application.Get()
 
-	s := app.GetWindowByName(name)
+	s, ok := app.Window.GetByName(name)
+	if !ok {
+		return
+	}
 	s.Close()
 }

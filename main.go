@@ -36,7 +36,7 @@ func main() {
 
 	dbHandler.app = app
 
-	app.NewWebviewWindowWithOptions(application.WebviewWindowOptions{
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "VerseBearer",
 		MinWidth:  900,
 		Width:     900,
