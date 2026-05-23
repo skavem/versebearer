@@ -13,6 +13,7 @@ import {
   GetVerses,
 } from "$lib/bindings/changeme/dbhandler";
 import { Events } from "@wailsio/runtime";
+import { cycleIndex } from "./cycle";
 
 const createBibleStore = () => {
   let translationsLoading = $state(true);
@@ -144,14 +145,12 @@ const createBibleStore = () => {
     },
 
     next() {
-      const ind = chaptersList.findIndex((c) => c.ID === activeChapter?.ID);
-      if (ind === -1 || ind === chaptersList.length - 1) return;
-      chapters.active = chaptersList[ind + 1];
+      const n = cycleIndex(chaptersList, activeChapter, 1);
+      if (n) chapters.active = n;
     },
     prev() {
-      const ind = chaptersList.findIndex((c) => c.ID === activeChapter?.ID);
-      if (ind === -1 || ind === 0) return;
-      chapters.active = chaptersList[ind - 1];
+      const n = cycleIndex(chaptersList, activeChapter, -1);
+      if (n) chapters.active = n;
     },
   };
 
@@ -170,14 +169,12 @@ const createBibleStore = () => {
     },
 
     next() {
-      const ind = versesList.findIndex((v) => v.ID === activeVerse?.ID);
-      if (ind === -1 || ind === versesList.length - 1) return;
-      this.active = versesList[ind + 1];
+      const n = cycleIndex(versesList, activeVerse, 1);
+      if (n) this.active = n;
     },
     prev() {
-      const ind = versesList.findIndex((v) => v.ID === activeVerse?.ID);
-      if (ind === -1 || ind === 0) return;
-      this.active = versesList[ind - 1];
+      const n = cycleIndex(versesList, activeVerse, -1);
+      if (n) this.active = n;
     },
 
     get shown() {

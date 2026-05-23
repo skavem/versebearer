@@ -6,6 +6,7 @@ import {
   GetSongs,
 } from "$lib/bindings/changeme/dbhandler";
 import { Events } from "@wailsio/runtime";
+import { cycleIndex } from "./cycle";
 
 const createSongsStore = () => {
   let songsList = $state<Song[]>([]);
@@ -91,14 +92,12 @@ const createSongsStore = () => {
     },
 
     next() {
-      const ind = coupletsList.findIndex((v) => v.ID === activeCouplet?.ID);
-      if (ind === -1 || ind === coupletsList.length - 1) return;
-      this.active = coupletsList[ind + 1];
+      const n = cycleIndex(coupletsList, activeCouplet, 1);
+      if (n) this.active = n;
     },
     prev() {
-      const ind = coupletsList.findIndex((v) => v.ID === activeCouplet?.ID);
-      if (ind === -1 || ind === 0) return;
-      this.active = coupletsList[ind - 1];
+      const n = cycleIndex(coupletsList, activeCouplet, -1);
+      if (n) this.active = n;
     },
 
     get shown() {
