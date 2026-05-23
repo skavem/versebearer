@@ -90,9 +90,11 @@
 
       <div class="flex justify-center gap-2">
         <button
-          class="btn btn-neutral btn-sm"
+          class={[
+            "btn btn-wide",
+            shown ? "btn-outline btn-error" : "btn-neutral",
+          ]}
           onclick={() => {
-            console.log(shown?.ID, couplets.active?.ID);
             if (!shown) {
               showCouplet();
             } else {
@@ -101,15 +103,13 @@
           }}
         >
           <MuiIcon name={shown ? "visibility_off" : "visibility"} />
-          {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
+          {shown ? "Скрыть куплет" : "Показать куплет"}
         </button>
 
         <button
           class={[
-            "btn btn-sm btn-secondary btn-square",
-            {
-              "btn-outline": !songsStore.qr,
-            },
+            "btn btn-square",
+            songsStore.qr ? "btn-secondary" : "btn-outline btn-secondary",
           ]}
           onclick={() => {
             songsStore.qr = !songsStore.qr;
@@ -119,6 +119,7 @@
               HideQR();
             }
           }}
+          title="QR-код"
         >
           <MuiIcon name="qr_code" />
         </button>

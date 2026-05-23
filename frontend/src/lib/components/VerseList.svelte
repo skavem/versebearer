@@ -18,7 +18,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="group/list h-0 flex-grow select-none overflow-y-scroll border-2 border-zinc-100"
+  class="group/list h-0 flex-grow select-none overflow-y-scroll border border-base-300 rounded-lg"
   onkeydown={(e) => {
     if (
       ["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].indexOf(

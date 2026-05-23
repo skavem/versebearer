@@ -31,9 +31,10 @@
 <div
   bind:this={outerDiv}
   class={[
-    "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 hover:bg-zinc-100",
+    "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
     !isActive && "border-transparent",
-    isActive && "border-black/40",
+    isActive && "border-neutral bg-neutral/5",
+    isShown && "bg-secondary/10",
   ]}
   {onclick}
   {ondblclick}
@@ -48,7 +49,7 @@
     >
 
     {#if isShown}
-      <MuiIcon name="visibility" />
+      <MuiIcon name="visibility" style="color: var(--fallback-s,oklch(var(--s)))" />
     {/if}
   </div>
 </div>

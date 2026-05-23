@@ -48,7 +48,9 @@
 
 <dialog class="modal" open={isModalOpen} onclose={close}>
   <div class="modal-box max-w-full lg:w-1/2">
-    <div class="mb-4 text-lg font-bold">Добавить куплет</div>
+    <div class="mb-4 text-lg font-bold">
+      {isEdit ? "Редактировать куплет" : "Добавить куплет"}
+    </div>
 
     <button
       class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
@@ -97,7 +99,7 @@
         <textarea
           bind:value={text}
           class="textarea textarea-bordered"
-          placeholder="Bio"
+          placeholder="Текст куплета"
           rows="8"
           onkeydown={(e) => {
             if (e.code === "Escape") {

@@ -111,9 +111,12 @@
         }}
       ></VerseList>
 
-      <div class="flex justify-center gap-2">
+      <div class="flex justify-center">
         <button
-          class="btn btn-neutral btn-sm"
+          class={[
+            "btn btn-wide",
+            shown ? "btn-outline btn-error" : "btn-neutral",
+          ]}
           onclick={() => {
             if (shown) {
               HideVerse();
@@ -123,7 +126,7 @@
           }}
         >
           <MuiIcon name={shown ? "visibility_off" : "visibility"} />
-          {shown ? "СКРЫТЬ" : "ПОКАЗАТЬ"}
+          {shown ? "Скрыть стих" : "Показать стих"}
         </button>
       </div>
     </div>
