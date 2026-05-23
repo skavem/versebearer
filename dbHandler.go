@@ -251,12 +251,12 @@ func (g *DbHandler) GetSongs() []models.Song {
 	return songs
 }
 
-func (g *DbHandler) CreateSong(number int, title string) {
+func (g *DbHandler) CreateSong(number int, title string) *models.Song {
 	dbSong := models.Song{Number: number, Title: title}
 	err := inits.DB.Create(&dbSong).Error
 	if err != nil {
 		log.Println("Error creating song", err.Error())
-		return
+		return nil
 	}
 
 	songs := g.GetSongs()
@@ -265,6 +265,32 @@ func (g *DbHandler) CreateSong(number int, title string) {
 		songs[0].Couplets = firstSongCouplets
 	}
 
+	g.emit("songs_update", songs)
+	return &dbSong
+}
+
+func (g *DbHandler) RemoveSong(songId int) {
+	song := models.Song{}
+	if err := inits.DB.Find(&song, songId).Error; err != nil {
+		log.Println("Error finding song", err.Error())
+		return
+	}
+
+	if g.coupletB.state != nil && g.coupletB.state.Song.ID == uint(songId) {
+		g.hideCoupletInternal()
+	}
+
+	if err := inits.DB.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
+		log.Println("Error deleting couplets for song", err.Error())
+		return
+	}
+
+	if err := inits.DB.Delete(&models.Song{}, songId).Error; err != nil {
+		log.Println("Error deleting song", err.Error())
+		return
+	}
+
+	songs := g.GetSongs()
 	g.emit("songs_update", songs)
 }
 

@@ -18,7 +18,10 @@
 
   async function submit() {
     if (!title.trim()) return;
-    await CreateSong(number, title.trim());
+    const created = await CreateSong(number, title.trim());
+    if (created) {
+      songs.active = created;
+    }
     isOpen = false;
   }
 </script>

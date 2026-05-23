@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23c -->
 
 # versebearer
 
@@ -39,6 +39,7 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 - New Wails-exposed methods on `DbHandler` need `wails3 generate bindings` (`task common:generate:bindings`) to refresh `frontend/src/lib/bindings/`.
 - SSE port `9093` is hardcoded in `SSE.go`. The projector windows open `http://localhost:9093` directly (`DbHandler.ShowScreen`).
 - `couplet.Number` is the order field. `CreateCouplet` shifts all `>=number` up by one before insert **scoped to the same `song_id`** — the where-clause includes both `song_id = ? AND number >= ?` (a missing song_id filter was a real bug, fixed 2026-05-23). `RemoveCouplet` re-numbers `1..n` after delete. `UpdateCouplet` does NOT renumber — UI swaps numbers pair-wise via two `UpdateCouplet` calls for reordering.
+- Song CRUD: `CreateSong(number, title) *models.Song` — returns the created song so the UI can set it active without waiting for `songs_update`. `RemoveSong(songId)` — hides the active couplet first if it belongs to the deleted song, then cascades couplet delete + song delete + `songs_update` emit. No song-number renumber (numbers are free-form, not contiguous).
 
 ### Testing Requirements
 - Go smoke tests live in `dbHandler_test.go` (in-memory SQLite, no Wails dependency thanks to `emit` nil-safety). Run via `task test` (alias for `go test ./...`). Cover: `GetTranslations` preload depth, `CreateCouplet` song-scoped renumber, `RemoveCouplet` 1..n renumber.

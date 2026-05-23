@@ -1,7 +1,9 @@
 <script lang="ts">
+  import type { Song } from "$lib/bindings/changeme/backend/models";
   import {
     HideCouplet,
     HideQR,
+    RemoveSong,
     ShowCouplet,
     ShowQR,
   } from "$lib/bindings/changeme/dbhandler";
@@ -17,6 +19,20 @@
   const couplets = $derived(songsStore.couplets);
   const shown = $derived(songsStore.couplets.shown);
   const favorites = $derived(songsStore.favorites);
+
+  let songToDelete = $state<Song | null>(null);
+
+  const confirmDelete = async () => {
+    if (!songToDelete) return;
+    const id = songToDelete.ID;
+    if (songs.active?.ID === id) {
+      const list = songs.list;
+      const idx = list.findIndex((s) => s.ID === id);
+      songs.active = list[idx - 1] ?? list[idx + 1] ?? null;
+    }
+    songToDelete = null;
+    await RemoveSong(id);
+  };
 
   const showCouplet = () => {
     if (couplets.active) {
@@ -64,13 +80,26 @@
         <span class="badge badge-neutral font-semibold">{i.number}</span>
       {/snippet}
       {#snippet rightMark(i)}
-        <button
-          class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
-          onclick={(e) => {
-            favorites.add(i);
-            e.stopPropagation();
-          }}><MuiIcon name="star" style="font-size: 1rem" /></button
-        >
+        <div class="flex flex-row gap-1">
+          <button
+            class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
+            onclick={(e) => {
+              favorites.add(i);
+              e.stopPropagation();
+            }}
+            title="В избранное"
+            ><MuiIcon name="star" style="font-size: 1rem" /></button
+          >
+          <button
+            class="btn btn-error btn-xs hidden px-1 text-white group-hover/item:block"
+            onclick={(e) => {
+              songToDelete = i;
+              e.stopPropagation();
+            }}
+            title="Удалить песню"
+            ><MuiIcon name="delete" style="font-size: 1rem" /></button
+          >
+        </div>
       {/snippet}
     </List>
 
@@ -176,3 +205,40 @@
     </div>
   </div>
 </div>
+
+{#if songToDelete}
+  <div class="modal modal-open">
+    <div class="modal-box">
+      <div class="mb-2 flex items-center gap-3">
+        <div
+          class="flex h-10 w-10 items-center justify-center rounded-full bg-error/10 text-error"
+        >
+          <MuiIcon name="delete" />
+        </div>
+        <h3 class="text-lg font-bold">Удалить песню?</h3>
+      </div>
+
+      <p class="py-2">
+        Песня <span class="font-semibold"
+          >№{songToDelete.number} «{songToDelete.title}»</span
+        >
+        и все её куплеты будут удалены безвозвратно.
+      </p>
+
+      <div class="modal-action">
+        <button class="btn btn-ghost" onclick={() => (songToDelete = null)}>
+          Отмена
+        </button>
+        <button class="btn btn-error" onclick={confirmDelete}>
+          <MuiIcon name="delete" />
+          Удалить
+        </button>
+      </div>
+    </div>
+    <button
+      class="modal-backdrop"
+      onclick={() => (songToDelete = null)}
+      aria-label="Закрыть"
+    ></button>
+  </div>
+{/if}

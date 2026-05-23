@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-22 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
 
 # components
 
@@ -17,7 +17,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 | `CoupletItem.svelte` | Row used inside `CoupletsList.svelte` — supports multiline text |
 | `Select.svelte` | DaisyUI dropdown + text filter, max 20 results, dynamic max-height |
 | `SongsSelect.svelte` | Thin wrapper over `Select.svelte` for songs (display `"<number> - <title>"`, search by both) |
-| `CreateSongModal.svelte` | Modal: number (auto-incremented from last) + title → `CreateSong` |
+| `CreateSongModal.svelte` | Modal: number (auto-incremented from last) + title → `CreateSong`. Sets the returned song as active so the list scrolls to it |
 | `CreateEditCoupletModal.svelte` | Modal for both create and edit. Quick-fill buttons "Куплет"/"Припев"/"Бридж" for the label |
 | `ScreenToggler.svelte` | Button per OS display. Toggles a `ShowScreen`/`CloseScreen` pair; uses `screen <ID>` as window name |
 | `MuiIcon.svelte` | Renders a `<span class="material-icons">` with a typed `name` prop |
@@ -29,6 +29,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 - All components use Svelte 5 runes (`$props`, `$state`, `$derived`, `$bindable`, `$effect`). No `export let`, no `$:` reactive labels.
 - Generic components use `<script lang="ts" generics="T extends {ID: number}">`.
 - `List.svelte` virtualization assumes fixed 44px row height — if you change padding/border, update both the `44` in `shown` derivation and the absolute-positioned `top` in `ListItem.svelte`.
+- `List.svelte` re-runs its auto-scroll effect on **both** `activeItem` change AND `items.length` change. The latter is what makes the list scroll to the (unchanged) active row after a sibling is deleted, or to a freshly created row inserted into a long list. If you add a new "trigger a re-scroll" condition, extend that effect — don't add a parallel one.
 - Reordering couplets in `CoupletsList.svelte` is done by **two `UpdateCouplet` calls** that swap the `number` fields — there is no dedicated reorder endpoint. Keep that pattern when wiring new reorder UI.
 - Modal pattern: parent component owns `isModalOpen = $state(false)` and binds it via `bind:isModalOpen` to the modal child. The child closes by setting `false`.
 - `MuiIcon.ts` is enormous (2k+ entries). When adding a new icon usage, the name must already exist in that list; otherwise the type-check fails. Don't extend the list ad-hoc.

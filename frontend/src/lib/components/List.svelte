@@ -45,12 +45,15 @@
   let scrolled = $state(false);
   $effect(() => {
     activeItem;
+    items.length;
     scrolled = false;
   });
   $effect(() => {
     if (activeItem && mainDiv && !scrolled) {
-      const i = items.findIndex((i) => getActiveKey(i) === getActiveKey(activeItem));
-      if (i > shown.from && i < shown.to) return;
+      const i = items.findIndex(
+        (i) => getActiveKey(i) === getActiveKey(activeItem),
+      );
+      if (i < 0) return;
       scrolled = true;
       mainDiv.scrollTo({ top: i * 44 });
     }

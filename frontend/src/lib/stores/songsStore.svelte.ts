@@ -42,13 +42,28 @@ const createSongsStore = () => {
       return songsList;
     },
     set list(v) {
+      const prevActive = activeSong;
       songsList = v;
-      activeSong = songsList.at(0) || null;
+
+      const kept = prevActive && v.find((s) => s.ID === prevActive.ID);
+      activeSong = kept ?? v.at(0) ?? null;
       songsLoading = false;
 
-      coupletsList = activeSong?.couplets ?? [];
-      activeCouplet = coupletsList.at(0) || null;
-      coupletsLoading = false;
+      if (activeSong?.ID !== prevActive?.ID) {
+        coupletsList = activeSong?.couplets ?? [];
+        activeCouplet = coupletsList.at(0) || null;
+        coupletsLoading = false;
+      }
+
+      favoriteSongs = favoriteSongs.filter((f) =>
+        songsList.some((s) => s.ID === f.ID),
+      );
+      if (
+        activeFavorite &&
+        !favoriteSongs.some((f) => f.localId === activeFavorite!.localId)
+      ) {
+        activeFavorite = null;
+      }
     },
     get active() {
       return activeSong;
@@ -56,8 +71,15 @@ const createSongsStore = () => {
     set active(val) {
       activeSong = val;
 
+      if (!val) {
+        coupletsList = [];
+        activeCouplet = null;
+        coupletsLoading = false;
+        return;
+      }
+
       coupletsLoading = true;
-      GetCouplets(activeSong!.ID).then((couplets) => {
+      GetCouplets(val.ID).then((couplets) => {
         coupletsList = couplets;
         activeCouplet = coupletsList.at(0) || null;
         coupletsLoading = false;

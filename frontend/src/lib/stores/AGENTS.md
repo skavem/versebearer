@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23c -->
 
 # stores
 
@@ -22,6 +22,8 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 - Setting `.active` triggers downstream fetches (e.g. `books.active = b` → `GetChapters(b.ID)` → updates `chaptersList` + `activeChapter` + clears verses). When adding a new entity level, mirror this cascade.
 - `BibleStore.history` is built in-memory only — closing the app loses it. `historyVerses.toReversed()` exposes most-recent-first to the UI.
 - `songsStore.favorites` items are `Song & { localId: number }` where `localId = Math.random()`. Two entries for the same `ID` are valid and intentional. Use `localId` for remove/move, NOT `ID`.
+- `songsStore.songs.list` setter preserves the current `active` when the song still exists in the new list (so `songs_update` from create/delete does not clobber the user's selection). It also drops `favorites` entries whose underlying song was deleted. `songs.active` setter is null-safe (passing `null` clears couplets without firing `GetCouplets`).
+- Callsites pre-select the next active BEFORE awaiting `RemoveSong`/`CreateSong`: `Songs.svelte#confirmDelete` picks `list[idx-1] ?? list[idx+1]` when the active song is the one being removed; `CreateSongModal#submit` sets `songs.active = created` after the call. The setter then keeps that choice when `songs_update` arrives.
 - Wails event names from `dbHandler.go` (`show_verse`, `hide_verse`, `show_couplet`, `hide_couplet`, `songs_update`, `song_update`) — keep in sync with the Go side.
 - `Events.On("show_verse", ({ data }: { data: ShownVerse }) => ...)` — Wails v3 `Event.Emit(name, single)` delivers `data` as the value itself (no array wrap). If backend emits multiple args (`Emit(name, a, b)`), `data` is `[a, b]`.
 
