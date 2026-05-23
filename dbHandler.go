@@ -23,46 +23,44 @@ type ShownCouplet struct {
 }
 
 type DbHandler struct {
-	verse        *ShownVerse
-	verseChannel chan *ShownVerse
-
-	couplet        *ShownCouplet
-	coupletChannel chan *ShownCouplet
+	verseB   *broadcaster[ShownVerse]
+	coupletB *broadcaster[ShownCouplet]
 
 	qr chan *bool
 
 	app *application.App
 }
 
+type broadcaster[T any] struct {
+	state   *T
+	ch      chan *T
+	showEvt string
+	hideEvt string
+	emit    func(name string, data any)
+}
+
+func (b *broadcaster[T]) show(val *T) {
+	b.state = val
+	b.ch <- val
+	b.emit(b.showEvt, val)
+}
+
+func (b *broadcaster[T]) hide() {
+	b.state = nil
+	b.ch <- nil
+	b.emit(b.hideEvt, nil)
+}
+
 func (g *DbHandler) emit(name string, data any) {
 	if g.app != nil {
-		g.emit(name, data)
+		g.app.Event.Emit(name, data)
 	}
 }
 
-func (g *DbHandler) showVerseInternal(verse *ShownVerse) {
-	g.verse = verse
-	g.verseChannel <- verse
-	g.emit("show_verse", g.verse)
-}
-
-func (g *DbHandler) hideVerseInternal() {
-	g.verse = nil
-	g.verseChannel <- nil
-	g.emit("hide_verse", nil)
-}
-
-func (g *DbHandler) showCoupletInternal(couplet *ShownCouplet) {
-	g.couplet = couplet
-	g.coupletChannel <- couplet
-	g.emit("show_couplet", g.couplet)
-}
-
-func (g *DbHandler) hideCoupletInternal() {
-	g.couplet = nil
-	g.coupletChannel <- nil
-	g.emit("hide_couplet", nil)
-}
+func (g *DbHandler) showVerseInternal(verse *ShownVerse)       { g.verseB.show(verse) }
+func (g *DbHandler) hideVerseInternal()                        { g.verseB.hide() }
+func (g *DbHandler) showCoupletInternal(couplet *ShownCouplet) { g.coupletB.show(couplet) }
+func (g *DbHandler) hideCoupletInternal()                      { g.coupletB.hide() }
 
 func addAscByNumber(db *gorm.DB) *gorm.DB {
 	return db.Order("couplets.number ASC")
@@ -231,11 +229,11 @@ func (g *DbHandler) ShowVerse(verseId float32) *ShownVerse {
 		Translation: *translation,
 	})
 
-	return g.verse
+	return g.verseB.state
 }
 
 func (g *DbHandler) GetShownVerse() *ShownVerse {
-	return g.verse
+	return g.verseB.state
 }
 
 func (g *DbHandler) HideVerse() {
@@ -321,7 +319,7 @@ func (g *DbHandler) ShowCouplet(coupletFloatId float32) *ShownCouplet {
 		Song:    *song,
 	})
 
-	return g.couplet
+	return g.coupletB.state
 }
 
 func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
@@ -409,7 +407,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 }
 
 func (g *DbHandler) GetShownCouplet() *ShownCouplet {
-	return g.couplet
+	return g.coupletB.state
 }
 
 func (g *DbHandler) HideCouplet() {

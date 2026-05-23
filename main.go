@@ -14,9 +14,19 @@ var assets embed.FS
 func main() {
 	bibleChannel, songChannel, qrChannel := createChannels()
 	dbHandler := DbHandler{
-		verseChannel:   bibleChannel,
-		coupletChannel: songChannel,
-		qr:             qrChannel,
+		qr: qrChannel,
+	}
+	dbHandler.verseB = &broadcaster[ShownVerse]{
+		ch:      bibleChannel,
+		showEvt: "show_verse",
+		hideEvt: "hide_verse",
+		emit:    dbHandler.emit,
+	}
+	dbHandler.coupletB = &broadcaster[ShownCouplet]{
+		ch:      songChannel,
+		showEvt: "show_couplet",
+		hideEvt: "hide_couplet",
+		emit:    dbHandler.emit,
 	}
 	go createSSE(bibleChannel, songChannel, qrChannel)
 
