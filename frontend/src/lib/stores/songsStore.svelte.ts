@@ -23,8 +23,8 @@ const createSongsStore = () => {
   const hideCouplet = () => {
     shownCouplet = null;
   };
-  Events.On("show_couplet", ({ data }: { data: ShownCouplet[] }) => {
-    showCouplet(data[0]);
+  Events.On("show_couplet", ({ data }: { data: ShownCouplet }) => {
+    showCouplet(data);
   });
   Events.On("hide_couplet", () => {
     hideCouplet();
@@ -65,13 +65,13 @@ const createSongsStore = () => {
   };
   Events.On(
     "songs_update",
-    ({ data }: { data: Song[][] }) => (songs.list = data[0]),
+    ({ data }: { data: Song[] }) => (songs.list = data),
   );
-  Events.On("song_update", ({ data }: { data: Song[] }) => {
-    if (songs.active?.ID !== data[0].ID) {
+  Events.On("song_update", ({ data }: { data: Song }) => {
+    if (songs.active?.ID !== data.ID) {
       return;
     }
-    coupletsList = data[0].couplets;
+    coupletsList = data.couplets;
     const active = coupletsList.find((v) => v.ID === activeCouplet?.ID);
     activeCouplet = active ?? coupletsList.at(0) ?? null;
   });

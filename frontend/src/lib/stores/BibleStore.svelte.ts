@@ -42,8 +42,8 @@ const createBibleStore = () => {
   const hideVerse = () => {
     shownVerse = null;
   };
-  Events.On("show_verse", ({ data }: { data: ShownVerse[] }) => {
-    showVerse(data[0]);
+  Events.On("show_verse", ({ data }: { data: ShownVerse }) => {
+    showVerse(data);
   });
   Events.On("hide_verse", () => {
     hideVerse();

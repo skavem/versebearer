@@ -22,7 +22,7 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 - `BibleStore.history` is built in-memory only — closing the app loses it. `historyVerses.toReversed()` exposes most-recent-first to the UI.
 - `songsStore.favorites` items are `Song & { localId: number }` where `localId = Math.random()`. Two entries for the same `ID` are valid and intentional. Use `localId` for remove/move, NOT `ID`.
 - Wails event names from `dbHandler.go` (`show_verse`, `hide_verse`, `show_couplet`, `hide_couplet`, `songs_update`, `song_update`) — keep in sync with the Go side.
-- `Events.On("show_verse", ({ data }: { data: ShownVerse[] }) => ...)` — the wails runtime wraps payload in `data[0]`. Single payload always sits at index 0.
+- `Events.On("show_verse", ({ data }: { data: ShownVerse }) => ...)` — Wails v3 `Event.Emit(name, single)` delivers `data` as the value itself (no array wrap). If backend emits multiple args (`Emit(name, a, b)`), `data` is `[a, b]`.
 
 ### Common Patterns
 - Each store exposes sub-objects (`translations`, `books`, `chapters`, `verses`, `history` etc.) so consumers do `BibleStore.verses.next()` rather than `BibleStore.nextVerse()`.

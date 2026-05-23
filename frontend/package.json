@@ -28,7 +28,7 @@
 	"type": "module",
 	"dependencies": {
 		"@sveltejs/adapter-static": "^3.0.5",
-		"@wailsio/runtime": "3.0.0-alpha.29",
+		"@wailsio/runtime": "^3.0.0-alpha.78",
 		"tailwind-merge": "^2.6.0"
 	}
 }
