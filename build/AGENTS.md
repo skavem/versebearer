@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
 
 # build
 
@@ -38,6 +38,7 @@ Wails3 build pipeline. Per-OS Taskfiles, Windows NSIS installer setup, Linux nfp
 - Vite dev port is 9245 by default (root `Taskfile.yml` `VITE_PORT`). Override via env: `WAILS_VITE_PORT=NNN task dev`.
 - Bindings generation: `task common:generate:bindings` runs `wails3 generate bindings -d ./frontend/src/lib/bindings -f '{{.BUILD_FLAGS}}'`. The `-ts` flag is gated by `UseTypescript` — not set in the current config but the bindings ARE TypeScript files. Investigate before "fixing".
 - The `package` task on Windows depends on `build` with `PRODUCTION: "true"` — packaging triggers a fresh production build, not reuse of a debug binary.
+- `task test` at the repo root runs `go test ./...` against the in-memory SQLite smoke tests in `dbHandler_test.go`. No Wails/frontend deps needed — tests construct `&DbHandler{}` with nil app and rely on the `emit()` wrapper's nil-guard.
 
 ## Dependencies
 

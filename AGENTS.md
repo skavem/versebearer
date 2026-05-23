@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23 -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-23b -->
 
 # versebearer
 
@@ -30,16 +30,19 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 
 ### Working In This Directory
 - Module path is `changeme` — do not rename without updating every `changeme/...` import.
-- Three independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle). `DbHandler.showVerseInternal/hideVerseInternal/showCoupletInternal/hideCoupletInternal` are the only producers — they push to the channel AND `app.Event.Emit` for the Wails frontend in one step. Keep both sides in sync.
-- `main()` constructs channels and `DbHandler` *before* `application.New` then assigns `dbHandler.app = app` after — `app` is nil until then, so never call `app.Event.Emit` during construction.
+- Three independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle). The `broadcaster[T]` instances on `DbHandler` (`verseB`, `coupletB`) are the only producers for verse/couplet — they push to the channel AND emit a Wails event in one `.show(v)`/`.hide()` call. QR stays as ad-hoc `chan *bool` (different shape, only 2 callsites). Keep channel reads in `SSE.go:watchChannels` in sync with what broadcasters send.
+- `broadcaster[T any]` (in `dbHandler.go`) is an unexported generic that owns: state pointer, channel, show/hide event names, and an `emit` callback. To add a new show/hide entity, construct another `broadcaster[YourType]` in `main.go` and wire it the same way as `verseB`/`coupletB`. Don't make broadcasters exported — Wails service reflection scans exported methods, not fields, so unexported is safe.
+- `findByParent[T any](field, parentId, order)` (unexported package-level in `dbHandler.go`) is the generic GORM helper for child lookups. Each `getX` private method delegates to it. **Keep generics unexported.** Wails binding generation walks exported methods and needs concrete return types — exported generic methods would either fail to generate or produce `any`-typed JS classes.
+- `main()` constructs channels and `DbHandler` *before* `application.New` then assigns `dbHandler.app = app` after — `app` is nil until then. The `emit(name, data)` wrapper on `DbHandler` guards `if g.app != nil` so it's safe to call during construction / tests without an app. Broadcasters take `dbHandler.emit` as a method-value callback (the binding picks up the assigned `app` once it's set).
 - Wails v3 manager-pattern API in use: `app.Event` (`EventManager`), `app.Window` (`NewWithOptions` / `GetByName(name) (Window, bool)`). Do not revert to the pre-alpha.12 flat methods (`EmitEvent`, `NewWebviewWindowWithOptions`, `GetWindowByName`).
 - `app.Event.Emit(name, single)` sets the JS `data` to `single` directly. JS handlers read `({data}) => ...`, NOT `data[0]`. Backend code that emits two+ args produces a JS array.
 - New Wails-exposed methods on `DbHandler` need `wails3 generate bindings` (`task common:generate:bindings`) to refresh `frontend/src/lib/bindings/`.
 - SSE port `9093` is hardcoded in `SSE.go`. The projector windows open `http://localhost:9093` directly (`DbHandler.ShowScreen`).
-- `couplet.Number` is the order field. `CreateCouplet` shifts all `>=number` up by one before insert. `RemoveCouplet` re-numbers `1..n` after delete. `UpdateCouplet` does NOT renumber — UI swaps numbers pair-wise via two `UpdateCouplet` calls for reordering.
+- `couplet.Number` is the order field. `CreateCouplet` shifts all `>=number` up by one before insert **scoped to the same `song_id`** — the where-clause includes both `song_id = ? AND number >= ?` (a missing song_id filter was a real bug, fixed 2026-05-23). `RemoveCouplet` re-numbers `1..n` after delete. `UpdateCouplet` does NOT renumber — UI swaps numbers pair-wise via two `UpdateCouplet` calls for reordering.
 
 ### Testing Requirements
-- No automated tests in repo. Verify by running `wails3 dev` or `task dev` and exercising the UI.
+- Go smoke tests live in `dbHandler_test.go` (in-memory SQLite, no Wails dependency thanks to `emit` nil-safety). Run via `task test` (alias for `go test ./...`). Cover: `GetTranslations` preload depth, `CreateCouplet` song-scoped renumber, `RemoveCouplet` 1..n renumber.
+- Manual UI: `wails3 dev` or `task dev` and exercise the three tabs + projector.
 - Frontend type-check: `cd frontend && npm run check`.
 - Reciever type-check: `cd reciever && npm run check`.
 
