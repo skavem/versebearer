@@ -23,6 +23,12 @@
     timers[key] = setTimeout(fn, ms);
   }
 
+  $effect(() => {
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+    };
+  });
+
   // Text shadow decomposed state (derived from style.textShadow)
   let shadowColor = $state("#000000");
   let shadowX = $state(0);
@@ -63,7 +69,7 @@
 
   <!-- Background color + opacity -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Фон</label>
+    <span class="text-sm font-medium">Фон</span>
     <div class="flex items-center gap-3">
       <input
         type="color"
@@ -89,7 +95,7 @@
 
   <!-- Text color -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Цвет текста</label>
+    <span class="text-sm font-medium">Цвет текста</span>
     <input
       type="color"
       class="input input-bordered h-10 w-14 cursor-pointer p-1"
@@ -100,7 +106,7 @@
 
   <!-- Font family -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Шрифт</label>
+    <span class="text-sm font-medium">Шрифт</span>
     <select
       class="select select-bordered w-full"
       value={style.fontId?.toString() ?? ""}
@@ -119,7 +125,7 @@
 
   <!-- Border -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Рамка</label>
+    <span class="text-sm font-medium">Рамка</span>
     <div class="grid grid-cols-2 gap-2">
       <div class="flex flex-col gap-1">
         <span class="text-xs text-base-content/60">Цвет</span>
@@ -170,7 +176,7 @@
 
   <!-- Padding -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Отступ (px)</label>
+    <span class="text-sm font-medium">Отступ (px)</span>
     <input
       type="number"
       class="input input-bordered input-sm w-full"
@@ -183,7 +189,7 @@
 
   <!-- Text shadow -->
   <div class="flex flex-col gap-1">
-    <label class="text-sm font-medium">Тень текста</label>
+    <span class="text-sm font-medium">Тень текста</span>
     <div class="grid grid-cols-2 gap-2">
       <div class="flex flex-col gap-1">
         <span class="text-xs text-base-content/60">Цвет</span>

@@ -36,6 +36,10 @@
   let coupletStyle = $state<IVisualStyle>({ ...defaultCoupletStyle });
   let fonts = $state<IFont[]>([]);
 
+  function cssSafe(s: string): string {
+    return s.replace(/[\\"]/g, "\\$&").replace(/\s/g, " ").replace(/[;{}]/g, "");
+  }
+
   function injectFonts(fontList: IFont[]) {
     let styleEl = document.getElementById("dynamic-fonts");
     if (!styleEl) {
@@ -46,7 +50,7 @@
     styleEl.textContent = fontList
       .map((f) => {
         const ext = f.mimeType === "font/woff2" || f.mimeType === "application/font-woff2" ? "woff2" : "ttf";
-        return `@font-face { font-family: "${f.name}"; src: url("/font/${f.ID}.${ext}") format("${ext === "woff2" ? "woff2" : "truetype"}"); }`;
+        return `@font-face { font-family: "${cssSafe(f.name)}"; src: url("/font/${f.ID}.${ext}") format("${ext === "woff2" ? "woff2" : "truetype"}"); }`;
       })
       .join("\n");
   }
