@@ -13,6 +13,7 @@
     borderRadius: 16,
     borderStyle: "solid",
     padding: 32,
+    margin: 0,
     textShadow: "",
   };
 
@@ -26,6 +27,7 @@
     borderRadius: 0,
     borderStyle: "solid",
     padding: 64,
+    margin: 0,
     textShadow: "",
   };
 

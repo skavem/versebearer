@@ -138,6 +138,9 @@ func mergeStyle(s *VisualStyle, m map[string]any) {
 	if v, ok := m["padding"].(int); ok {
 		s.Padding = v
 	}
+	if v, ok := m["margin"].(int); ok {
+		s.Margin = v
+	}
 	if v, ok := m["textShadow"].(string); ok {
 		s.TextShadow = v
 	}

@@ -54,7 +54,7 @@
 </script>
 
 {#if verse}
-  <div class="outer" transition:fade>
+  <div class="outer" transition:fade style:padding="calc(2rem + {style.margin}px)">
     <div
       class="inner"
       bind:this={outerDiv}

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-05-22 | Updated: 2026-05-23d -->
+<!-- Generated: 2026-05-22 | Updated: 2026-05-25 -->
 
 # versebearer
 
@@ -30,7 +30,8 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 
 ### Working In This Directory
 - Module path is `changeme` — do not rename without updating every `changeme/...` import.
-- Three independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle). The `broadcaster[T]` instances on `DbHandler` (`verseB`, `coupletB`) are the only producers for verse/couplet — they push to the channel AND emit a Wails event in one `.show(v)`/`.hide()` call. QR stays as ad-hoc `chan *bool` (different shape, only 2 callsites). Keep channel reads in `SSE.go:watchChannels` in sync with what broadcasters send.
+- Four independent event channels: `bibleChannel` (verses), `songChannel` (couplets), `qrChannel` (QR toggle), `styleChannel` (visual style + fonts). The `broadcaster[T]` instances on `DbHandler` (`verseB`, `coupletB`) are the only producers for verse/couplet — they push to the channel AND emit a Wails event in one `.show(v)`/`.hide()` call. QR stays as ad-hoc `chan *bool` (different shape, only 2 callsites). `styleChannel` carries `*StyleEvent{Type, Target, Style, Fonts}` — produced by `Update*Style` / `Reset*Style` / `UploadFont` / `DeleteFont`. `SSE.go:watchChannels` keeps a `lastVerseStyle` / `lastCoupletStyle` / `lastFonts` cache (seeded from DB on startup) so `sync` events include the current style without a DB hit.
+- "Визуал" tab lets the operator customize verse and couplet projector styling independently (bg color/opacity, text color, font upload, border, padding, margin, text-shadow). Edits flow through `UpdateVerseStyle` / `UpdateCoupletStyle` (debounced 150ms in the UI), persist into the `GlobalState` row, and broadcast over `styleChannel` → SSE → receiver applies via `style:*` directives. See `backend/models/AGENTS.md` for the column layout.
 - `broadcaster[T any]` (in `dbHandler.go`) is an unexported generic that owns: state pointer, channel, show/hide event names, and an `emit` callback. To add a new show/hide entity, construct another `broadcaster[YourType]` in `main.go` and wire it the same way as `verseB`/`coupletB`. Don't make broadcasters exported — Wails service reflection scans exported methods, not fields, so unexported is safe.
 - `findByParent[T any](field, parentId, order)` (unexported package-level in `dbHandler.go`) is the generic GORM helper for child lookups. Each `getX` private method delegates to it. **Keep generics unexported.** Wails binding generation walks exported methods and needs concrete return types — exported generic methods would either fail to generate or produce `any`-typed JS classes.
 - `main()` constructs channels and `DbHandler` *before* `application.New` then assigns `dbHandler.app = app` after — `app` is nil until then. The `emit(name, data)` wrapper on `DbHandler` guards `if g.app != nil` so it's safe to call during construction / tests without an app. Broadcasters take `dbHandler.emit` as a method-value callback (the binding picks up the assigned `app` once it's set).

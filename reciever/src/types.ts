@@ -23,6 +23,7 @@ export type IVisualStyle = {
   borderRadius: number;
   borderStyle: string;
   padding: number;
+  margin: number;
   textShadow: string;
 }
 

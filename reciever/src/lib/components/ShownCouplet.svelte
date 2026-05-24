@@ -68,7 +68,7 @@
 </script>
 
 {#if couplet}
-  <div class="outer" transition:fade={{ duration: 600 }}>
+  <div class="outer" transition:fade={{ duration: 600 }} style:padding="{style.margin}px">
     <div
       class="inner"
       bind:this={innerDiv}

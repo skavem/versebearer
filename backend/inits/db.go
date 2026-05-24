@@ -57,5 +57,13 @@ func init() {
 		})
 	}
 
+	if gs.Version < "3" {
+		db.Model(&gs).Updates(map[string]any{
+			"verse_margin":   0,
+			"couplet_margin": 0,
+			"version":        "3",
+		})
+	}
+
 	DB = db
 }

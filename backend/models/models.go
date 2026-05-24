@@ -89,6 +89,7 @@ type GlobalState struct {
 	VerseBorderRadius int     `json:"verseBorderRadius"`
 	VerseBorderStyle  string  `json:"verseBorderStyle"`
 	VersePadding      int     `json:"versePadding"`
+	VerseMargin       int     `json:"verseMargin"`
 	VerseTextShadow   string  `json:"verseTextShadow"`
 	// Couplet style
 	CoupletBgColor      string  `json:"coupletBgColor"`
@@ -100,6 +101,7 @@ type GlobalState struct {
 	CoupletBorderRadius int     `json:"coupletBorderRadius"`
 	CoupletBorderStyle  string  `json:"coupletBorderStyle"`
 	CoupletPadding      int     `json:"coupletPadding"`
+	CoupletMargin       int     `json:"coupletMargin"`
 	CoupletTextShadow   string  `json:"coupletTextShadow"`
 }
 

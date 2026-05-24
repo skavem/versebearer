@@ -30,6 +30,7 @@ type StyleInput struct {
 	BorderRadius *int     `json:"borderRadius"`
 	BorderStyle  *string  `json:"borderStyle"`
 	Padding      *int     `json:"padding"`
+	Margin       *int     `json:"margin"`
 	TextShadow   *string  `json:"textShadow"`
 }
 
@@ -43,6 +44,7 @@ type VisualStyle struct {
 	BorderRadius int     `json:"borderRadius"`
 	BorderStyle  string  `json:"borderStyle"`
 	Padding      int     `json:"padding"`
+	Margin       int     `json:"margin"`
 	TextShadow   string  `json:"textShadow"`
 }
 
@@ -61,6 +63,7 @@ var DefaultVerseStyle = VisualStyle{
 	BorderRadius: 16,
 	BorderStyle:  "solid",
 	Padding:      32,
+	Margin:       0,
 	TextShadow:   "",
 }
 
@@ -73,6 +76,7 @@ var DefaultCoupletStyle = VisualStyle{
 	BorderRadius: 0,
 	BorderStyle:  "solid",
 	Padding:      64,
+	Margin:       0,
 	TextShadow:   "",
 }
 
@@ -612,6 +616,7 @@ func visualStyleFromGS(gs models.GlobalState, target string) VisualStyle {
 			BorderRadius: gs.VerseBorderRadius,
 			BorderStyle:  gs.VerseBorderStyle,
 			Padding:      gs.VersePadding,
+			Margin:       gs.VerseMargin,
 			TextShadow:   gs.VerseTextShadow,
 		}
 	}
@@ -625,6 +630,7 @@ func visualStyleFromGS(gs models.GlobalState, target string) VisualStyle {
 		BorderRadius: gs.CoupletBorderRadius,
 		BorderStyle:  gs.CoupletBorderStyle,
 		Padding:      gs.CoupletPadding,
+		Margin:       gs.CoupletMargin,
 		TextShadow:   gs.CoupletTextShadow,
 	}
 }
@@ -686,6 +692,10 @@ func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
 		gs.VersePadding = *input.Padding
 		updates["verse_padding"] = *input.Padding
 	}
+	if input.Margin != nil {
+		gs.VerseMargin = *input.Margin
+		updates["verse_margin"] = *input.Margin
+	}
 	if input.TextShadow != nil {
 		gs.VerseTextShadow = *input.TextShadow
 		updates["verse_text_shadow"] = *input.TextShadow
@@ -701,7 +711,7 @@ func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
 		"textColor": style.TextColor, "fontId": style.FontId,
 		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
 		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
-		"padding": style.Padding, "textShadow": style.TextShadow,
+		"padding": style.Padding, "margin": style.Margin, "textShadow": style.TextShadow,
 	}
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
 	return style
@@ -750,6 +760,10 @@ func (g *DbHandler) UpdateCoupletStyle(input StyleInput) VisualStyle {
 		gs.CoupletPadding = *input.Padding
 		updates["couplet_padding"] = *input.Padding
 	}
+	if input.Margin != nil {
+		gs.CoupletMargin = *input.Margin
+		updates["couplet_margin"] = *input.Margin
+	}
 	if input.TextShadow != nil {
 		gs.CoupletTextShadow = *input.TextShadow
 		updates["couplet_text_shadow"] = *input.TextShadow
@@ -765,7 +779,7 @@ func (g *DbHandler) UpdateCoupletStyle(input StyleInput) VisualStyle {
 		"textColor": style.TextColor, "fontId": style.FontId,
 		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
 		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
-		"padding": style.Padding, "textShadow": style.TextShadow,
+		"padding": style.Padding, "margin": style.Margin, "textShadow": style.TextShadow,
 	}
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
 	return style
@@ -787,6 +801,7 @@ func (g *DbHandler) ResetVerseStyle() VisualStyle {
 		"verse_border_radius": d.BorderRadius,
 		"verse_border_style":  d.BorderStyle,
 		"verse_padding":       d.Padding,
+		"verse_margin":        d.Margin,
 		"verse_text_shadow":   d.TextShadow,
 	}).Error; err != nil {
 		log.Println("ResetVerseStyle: error saving", err)
@@ -796,7 +811,7 @@ func (g *DbHandler) ResetVerseStyle() VisualStyle {
 		"textColor": d.TextColor, "fontId": (*uint)(nil),
 		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
 		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
-		"padding": d.Padding, "textShadow": d.TextShadow,
+		"padding": d.Padding, "margin": d.Margin, "textShadow": d.TextShadow,
 	}
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
 	return d
@@ -818,6 +833,7 @@ func (g *DbHandler) ResetCoupletStyle() VisualStyle {
 		"couplet_border_radius": d.BorderRadius,
 		"couplet_border_style":  d.BorderStyle,
 		"couplet_padding":       d.Padding,
+		"couplet_margin":        d.Margin,
 		"couplet_text_shadow":   d.TextShadow,
 	}).Error; err != nil {
 		log.Println("ResetCoupletStyle: error saving", err)
@@ -827,7 +843,7 @@ func (g *DbHandler) ResetCoupletStyle() VisualStyle {
 		"textColor": d.TextColor, "fontId": (*uint)(nil),
 		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
 		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
-		"padding": d.Padding, "textShadow": d.TextShadow,
+		"padding": d.Padding, "margin": d.Margin, "textShadow": d.TextShadow,
 	}
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
 	return d
@@ -889,7 +905,7 @@ func (g *DbHandler) DeleteFont(idF float32) {
 				"textColor": gs.VerseTextColor, "fontId": gs.VerseFontId,
 				"borderColor": gs.VerseBorderColor, "borderWidth": gs.VerseBorderWidth,
 				"borderRadius": gs.VerseBorderRadius, "borderStyle": gs.VerseBorderStyle,
-				"padding": gs.VersePadding, "textShadow": gs.VerseTextShadow,
+				"padding": gs.VersePadding, "margin": gs.VerseMargin, "textShadow": gs.VerseTextShadow,
 			}
 			g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: verseMap}
 			coupletMap := map[string]any{
@@ -897,7 +913,7 @@ func (g *DbHandler) DeleteFont(idF float32) {
 				"textColor": gs.CoupletTextColor, "fontId": gs.CoupletFontId,
 				"borderColor": gs.CoupletBorderColor, "borderWidth": gs.CoupletBorderWidth,
 				"borderRadius": gs.CoupletBorderRadius, "borderStyle": gs.CoupletBorderStyle,
-				"padding": gs.CoupletPadding, "textShadow": gs.CoupletTextShadow,
+				"padding": gs.CoupletPadding, "margin": gs.CoupletMargin, "textShadow": gs.CoupletTextShadow,
 			}
 			g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: coupletMap}
 		}

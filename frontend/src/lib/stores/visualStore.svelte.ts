@@ -20,6 +20,7 @@ const defaultVerseStyle: VisualStyle = {
   borderRadius: 16,
   borderStyle: "solid",
   padding: 32,
+  margin: 0,
   textShadow: "",
 };
 
@@ -33,6 +34,7 @@ const defaultCoupletStyle: VisualStyle = {
   borderRadius: 0,
   borderStyle: "solid",
   padding: 64,
+  margin: 0,
   textShadow: "",
 };
 
@@ -83,6 +85,7 @@ function createVisualStore() {
         borderRadius: patch.borderRadius ?? null,
         borderStyle: patch.borderStyle ?? null,
         padding: patch.padding ?? null,
+        margin: patch.margin ?? null,
         textShadow: patch.textShadow ?? null,
       };
       // optimistic update
@@ -102,6 +105,7 @@ function createVisualStore() {
         borderRadius: patch.borderRadius ?? null,
         borderStyle: patch.borderStyle ?? null,
         padding: patch.padding ?? null,
+        margin: patch.margin ?? null,
         textShadow: patch.textShadow ?? null,
       };
       coupletStyle = { ...coupletStyle, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== null && v !== undefined)) } as VisualStyle;

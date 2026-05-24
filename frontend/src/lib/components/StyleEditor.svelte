@@ -225,22 +225,36 @@
     </div>
   </section>
 
-  <!-- Отступ -->
+  <!-- Отступы -->
   <section class="flex flex-col gap-2">
     <div class="section-head">
       <MuiIcon name="format_size" style="font-size: 1rem" />
-      Отступ
+      Отступы
     </div>
-    <label class="num-field">
-      <input
-        type="number"
-        min="0"
-        value={style.padding}
-        oninput={(e) =>
-          debounce("padding", () => onUpdate({ padding: parseInt((e.target as HTMLInputElement).value) || 0 }), 150)}
-      />
-      <span class="num-unit">px</span>
-    </label>
+    <div class="grid grid-cols-2 gap-2">
+      <label class="num-field">
+        <span class="num-label">Внутр.</span>
+        <input
+          type="number"
+          min="0"
+          value={style.padding}
+          oninput={(e) =>
+            debounce("padding", () => onUpdate({ padding: parseInt((e.target as HTMLInputElement).value) || 0 }), 150)}
+        />
+        <span class="num-unit">px</span>
+      </label>
+      <label class="num-field">
+        <span class="num-label">Внешн.</span>
+        <input
+          type="number"
+          min="0"
+          value={style.margin}
+          oninput={(e) =>
+            debounce("margin", () => onUpdate({ margin: parseInt((e.target as HTMLInputElement).value) || 0 }), 150)}
+        />
+        <span class="num-unit">px</span>
+      </label>
+    </div>
   </section>
 
   <!-- Тень -->
