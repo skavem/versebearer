@@ -46,6 +46,9 @@
   };
 </script>
 
+<svelte:window
+  onkeydown={(e) => isModalOpen && e.key === "Escape" && close()}
+/>
 <dialog class="modal" open={isModalOpen} onclose={close}>
   <div class="modal-box max-w-full lg:w-1/2">
     <div class="mb-4 text-lg font-bold">

@@ -51,6 +51,10 @@
   {/if}
 </div>
 
+<svelte:window
+  onkeydown={(e) => pending && e.key === "Escape" && screenStore.cancelPending()}
+/>
+
 {#if pending}
   <div class="modal modal-open">
     <div class="modal-box">

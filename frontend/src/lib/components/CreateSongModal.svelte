@@ -34,6 +34,10 @@
   Добавить песню
 </button>
 
+<svelte:window
+  onkeydown={(e) => isOpen && e.key === "Escape" && (isOpen = false)}
+/>
+
 {#if isOpen}
   <div class="modal modal-open">
     <div class="modal-box">

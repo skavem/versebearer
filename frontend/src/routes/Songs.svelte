@@ -219,6 +219,10 @@
 
 <EditSongTextModal bind:isModalOpen={isEditSongTextOpen} />
 
+<svelte:window
+  onkeydown={(e) => songToDelete && e.key === "Escape" && (songToDelete = null)}
+/>
+
 {#if songToDelete}
   <div class="modal modal-open">
     <div class="modal-box">
