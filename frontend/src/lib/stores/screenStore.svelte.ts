@@ -79,6 +79,16 @@ const createScreenStore = () => {
         pendingScreen = null;
       }
     },
+    // Hotkey target: toggle projection on the non-primary monitor.
+    // Only acts when there are exactly two screens, so "the other screen"
+    // is unambiguous. Bypasses the current-screen confirm modal since the
+    // non-primary monitor is not where the operator UI lives.
+    toggleSecondary() {
+      if (list.length !== 2) return;
+      const target = list.find((s) => !s.IsPrimary);
+      if (!target) return;
+      applyToggle(target);
+    },
     cancelPending() {
       pendingScreen = null;
     },
