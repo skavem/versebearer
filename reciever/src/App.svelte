@@ -31,6 +31,15 @@
     textShadow: "",
   };
 
+  // Overlay mode: when the projector window is opened transparent
+  // (?transparent=1), drop the opaque page background so the desktop /
+  // underlying app shows through. index.html hard-codes a white body
+  // background, so we override it inline here.
+  if (new URLSearchParams(location.search).get("transparent") === "1") {
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+  }
+
   let verse = $state<IShownVerse | null>(null);
   let couplet = $state<IShownCouplet | null>(null);
   let qr = $state<boolean>(false);

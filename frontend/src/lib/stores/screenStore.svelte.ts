@@ -14,6 +14,8 @@ const createScreenStore = () => {
   let activeScreens = $state<string[]>([]);
   let currentScreenID = $state<string>("");
   let pendingScreen = $state<Screen | null>(null);
+  // Per-screen "open as transparent overlay" preference, keyed by screen id.
+  let transparentScreens = $state<Record<string, boolean>>({});
 
   Events.On("current_screen", ({ data }: { data: string }) => {
     currentScreenID = data;
@@ -28,7 +30,14 @@ const createScreenStore = () => {
       CloseScreen(id);
       activeScreens = activeScreens.filter((v) => v !== id);
     } else {
-      ShowScreen(s.Bounds.X, s.Bounds.Y, s.Bounds.Width, s.Bounds.Height, id);
+      ShowScreen(
+        s.Bounds.X,
+        s.Bounds.Y,
+        s.Bounds.Width,
+        s.Bounds.Height,
+        id,
+        transparentScreens[id] ?? false,
+      );
       activeScreens.push(id);
     }
   }
@@ -72,6 +81,12 @@ const createScreenStore = () => {
     },
     cancelPending() {
       pendingScreen = null;
+    },
+    isTransparent(s: Screen): boolean {
+      return transparentScreens[screenId(s)] ?? false;
+    },
+    setTransparent(s: Screen, val: boolean) {
+      transparentScreens = { ...transparentScreens, [screenId(s)]: val };
     },
   };
 };

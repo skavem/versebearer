@@ -581,10 +581,11 @@ func (g *DbHandler) GetCurrentScreenID() string {
 	return screenIDForWindow(w)
 }
 
-func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
+func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transparent bool) {
 	app := application.Get()
 
-	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	url := "http://localhost:9093"
+	opts := application.WebviewWindowOptions{
 		Name:        name,
 		Title:       "VerseBearer - screen",
 		Frameless:   true,
@@ -601,8 +602,21 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
 		KeyBindings: map[string]func(application.Window){
 			"Escape": func(win application.Window) { win.Close() },
 		},
-		URL: "http://localhost:9093",
-	})
+	}
+
+	if transparent {
+		// Overlay mode: a see-through window so the projected verse/couplet
+		// text floats over whatever else is on that monitor. Mouse events
+		// pass through to the app underneath. The receiver reads
+		// ?transparent=1 and drops its opaque page background.
+		opts.BackgroundType = application.BackgroundTypeTransparent
+		opts.BackgroundColour = application.NewRGBA(0, 0, 0, 0)
+		opts.IgnoreMouseEvents = true
+		url += "?transparent=1"
+	}
+	opts.URL = url
+
+	w := app.Window.NewWithOptions(opts)
 
 	w.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
 		g.emit("screen_closed", name)

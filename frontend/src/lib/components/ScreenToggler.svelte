@@ -13,6 +13,7 @@
 
   const projecting = $derived(screenStore.activeScreens.includes(id));
   const isCurrent = $derived(screenStore.currentScreenID === scr.ID);
+  const transparent = $derived(screenStore.isTransparent(scr));
   const aspectRatio = $derived((scr.Bounds.Width / scr.Bounds.Height).toFixed(2));
   const scalePct = $derived(Math.round(scr.ScaleFactor * 100));
 </script>
@@ -87,6 +88,28 @@
         <span class="font-mono font-semibold">{aspectRatio}:1</span>
       </div>
     </div>
+
+    <label
+      class={[
+        "mt-2 flex items-center justify-between gap-2 rounded-md bg-base-200/60 p-2",
+        projecting ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+      ]}
+      title={projecting
+        ? "Остановите трансляцию, чтобы изменить режим"
+        : "Окно проектора станет прозрачным — виден только текст поверх остального содержимого монитора"}
+    >
+      <span class="flex items-center gap-1 text-sm">
+        <MuiIcon name="opacity" style="font-size: 1.1rem" />
+        Прозрачный экран
+      </span>
+      <input
+        type="checkbox"
+        class="toggle toggle-sm toggle-neutral"
+        checked={transparent}
+        disabled={projecting}
+        onchange={(e) => screenStore.setTransparent(scr, e.currentTarget.checked)}
+      />
+    </label>
 
     <button
       onclick={() => screenStore.requestToggle(scr)}
