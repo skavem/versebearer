@@ -1,59 +1,97 @@
-# Welcome to Your New Wails3 Project!
+# VerseBearer
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+A [Wails 3](https://v3alpha.wails.io/) desktop app for projecting **Bible verses** and **Christian song couplets** onto external screens during church services.
 
-## Getting Started
+An operator drives the main window (SvelteKit UI) to pick verses, songs, and couplets. Selections are pushed over Server-Sent Events to a separate projector page that renders fullscreen text on one or more external monitors.
 
-1. Navigate to your project directory in the terminal.
+## How it works
 
-2. To run your application in development mode, use the following command:
+```
+┌─────────────────────┐        SSE (:9093)        ┌──────────────────────┐
+│  Operator window     │  ── show_verse ─────────▶ │  Projector window(s)  │
+│  (SvelteKit UI)      │  ── show_couplet ───────▶ │  (reciever Svelte app)│
+│  Bible · Songs ·     │  ── show_qr ────────────▶ │  fullscreen output    │
+│  Visual tabs         │  ── style / sync ───────▶ │  on external monitors │
+└─────────────────────┘                           └──────────────────────┘
+        │                                                    ▲
+        └── SQLite (GORM): translations, books, ─────────────┘
+            chapters, verses, songs, couplets
+```
 
-   ```
-   wails3 dev
-   ```
+- The operator UI and the projector app are two separate frontends embedded into a single Go binary.
+- The projector output is served on `http://localhost:9093` and broadcast to via SSE, so it stays in sync with the operator's picks and visual styling in real time.
+- Content is stored in a local SQLite database, seeded from `Bible.json` (Synodal translation) and `songs.json`.
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+## Features
 
-3. To build your application for production, use:
+- **Bible & Songs tabs** — browse translations/books/chapters/verses and songs/couplets, and push any selection to the projector.
+- **Multi-monitor projection** — open a projector window on any detected screen; the active operator screen is tracked so you don't project onto yourself.
+- **Transparent overlay mode** — open a projector as a see-through, click-through window so verse/couplet text floats over whatever else is on that monitor.
+- **`Ctrl+Shift+W` hotkey** — toggle projection on the secondary monitor (when exactly two screens are present), bypassing the confirm modal.
+- **Visual tab** — customize verse and couplet styling independently (background colour/opacity, text colour, custom font upload, border, padding, margin, text-shadow). Changes are persisted and broadcast to the projector live.
+- **QR display** — toggle a QR code on the projector output.
+- **Whole-song bulk edit** — replace all couplets of a song at once via a text modal.
 
-   ```
-   wails3 build
-   ```
+## Tech stack
 
-   This will create a production-ready executable in the `build` directory.
+| Layer | Technology |
+|-------|-----------|
+| Desktop shell | Wails 3 (alpha) |
+| Backend | Go 1.25, GORM + SQLite (`mattn/go-sqlite3`, CGO) |
+| Projector transport | `r3labs/sse` (SSE server on `:9093`) |
+| Operator UI | SvelteKit |
+| Projector UI | Svelte |
 
-## Exploring Wails3 Features
+## Getting started
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
+### Prerequisites
 
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
+- **Go ≥ 1.25**
+- **A C compiler** (e.g. `gcc` / MinGW-w64 on Windows) — the SQLite driver uses CGO, so builds require `CGO_ENABLED=1`.
+- **[Wails 3 CLI](https://v3alpha.wails.io/)** — `wails3`
+- **[Task](https://taskfile.dev/)** — `task` (build orchestration)
+- **Node.js** — for the `frontend/` and `reciever/` builds
 
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
+### Development
 
-   ```
-   go run .
-   ```
+Run with hot-reload for both frontend and backend:
 
-   Note: Some examples may be under development during the alpha phase.
+```
+task dev
+```
 
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3alpha.wails.io/) for in-depth guides and API references.
+(equivalent to `wails3 dev`)
 
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
+### Build
 
-## Project Structure
+Produce a production executable in the `build/` directory:
 
-Take a moment to familiarize yourself with your project structure:
+```
+wails3 build
+```
 
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
+### Test
 
-## Next Steps
+```
+task test          # Go smoke tests (in-memory SQLite)
+cd frontend && npm run check   # operator UI type-check
+cd reciever && npm run check   # projector UI type-check
+```
 
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
+## Project structure
 
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+| Path | Purpose |
+|------|---------|
+| `main.go` | Wails 3 entrypoint — wires the `DbHandler` service, starts the SSE server, opens the main window |
+| `dbHandler.go` | Wails-exposed service: CRUD + show/hide for verses, couplets, QR, and screens |
+| `sse.go` | SSE server on `:9093` — serves the embedded projector app and broadcasts events |
+| `backend/` | GORM models, DB init, JSON seeder |
+| `frontend/` | Operator SvelteKit UI (embedded into the binary) |
+| `reciever/` | Projector output Svelte app (embedded, served on `:9093`) |
+| `build/` | Per-OS build pipeline: Taskfiles, NSIS installer, Linux packaging, icons |
+| `Bible.json` | Seed Synodal translation |
+| `songs.json` | Seed song dump (local, git-ignored) |
+
+> The module path is `changeme`; renaming it requires updating every `changeme/...` import.
+
+More detail for each area lives in the per-directory `AGENTS.md` files.
