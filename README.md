@@ -1,97 +1,98 @@
 # VerseBearer
 
-A [Wails 3](https://v3alpha.wails.io/) desktop app for projecting **Bible verses** and **Christian song couplets** onto external screens during church services.
+Десктопное приложение на [Wails 3](https://v3alpha.wails.io/) для проецирования **библейских стихов** и **куплетов христианских песен** на внешние экраны во время церковных служений.
 
-An operator drives the main window (SvelteKit UI) to pick verses, songs, and couplets. Selections are pushed over Server-Sent Events to a separate projector page that renders fullscreen text on one or more external monitors.
+Оператор управляет главным окном (интерфейс на SvelteKit), выбирая стихи, песни и куплеты. Выбор отправляется через Server-Sent Events на отдельную страницу-проектор, которая показывает полноэкранный текст на одном или нескольких внешних мониторах.
 
-## How it works
+## Как это работает
 
 ```
 ┌─────────────────────┐        SSE (:9093)        ┌──────────────────────┐
-│  Operator window     │  ── show_verse ─────────▶ │  Projector window(s)  │
-│  (SvelteKit UI)      │  ── show_couplet ───────▶ │  (reciever Svelte app)│
-│  Bible · Songs ·     │  ── show_qr ────────────▶ │  fullscreen output    │
-│  Visual tabs         │  ── style / sync ───────▶ │  on external monitors │
-└─────────────────────┘                           └──────────────────────┘
+│  Окно оператора      │  ── show_verse ─────────▶ │  Окно(а) проектора    │
+│  (интерфейс SvelteKit)│  ── show_couplet ───────▶ │  (Svelte-приложение   │
+│  вкладки Библия ·    │  ── show_qr ────────────▶ │   reciever)           │
+│  Песни · Визуал      │  ── style / sync ───────▶ │  полноэкранный вывод  │
+└─────────────────────┘                           │  на внешних мониторах │
+        │                                          └──────────────────────┘
         │                                                    ▲
-        └── SQLite (GORM): translations, books, ─────────────┘
-            chapters, verses, songs, couplets
+        └── SQLite (GORM): переводы, книги, ─────────────────┘
+            главы, стихи, песни, куплеты
 ```
 
-- The operator UI and the projector app are two separate frontends embedded into a single Go binary.
-- The projector output is served on `http://localhost:9093` and broadcast to via SSE, so it stays in sync with the operator's picks and visual styling in real time.
-- Content is stored in a local SQLite database, seeded from `Bible.json` (Synodal translation) and `songs.json`.
+- Интерфейс оператора и приложение-проектор — два отдельных фронтенда, встроенных в один Go-бинарник.
+- Вывод проектора отдаётся по адресу `http://localhost:9093` и рассылается через SSE, поэтому остаётся синхронным с выбором оператора и настройками оформления в реальном времени.
+- Контент хранится в локальной базе SQLite, наполняемой из `Bible.json` (Синодальный перевод) и `songs.json`.
 
-## Features
+## Возможности
 
-- **Bible & Songs tabs** — browse translations/books/chapters/verses and songs/couplets, and push any selection to the projector.
-- **Multi-monitor projection** — open a projector window on any detected screen; the active operator screen is tracked so you don't project onto yourself.
-- **Transparent overlay mode** — open a projector as a see-through, click-through window so verse/couplet text floats over whatever else is on that monitor.
-- **`Ctrl+Shift+W` hotkey** — toggle projection on the secondary monitor (when exactly two screens are present), bypassing the confirm modal.
-- **Visual tab** — customize verse and couplet styling independently (background colour/opacity, text colour, custom font upload, border, padding, margin, text-shadow). Changes are persisted and broadcast to the projector live.
-- **QR display** — toggle a QR code on the projector output.
-- **Whole-song bulk edit** — replace all couplets of a song at once via a text modal.
+- **Вкладки Библия и Песни** — навигация по переводам/книгам/главам/стихам и песням/куплетам, отправка любого выбора на проектор.
+- **Мультимониторная проекция** — открытие окна проектора на любом обнаруженном экране; активный экран оператора отслеживается, чтобы не проецировать на самого себя.
+- **Режим прозрачного оверлея** — открытие проектора прозрачным окном с прокликиванием насквозь: текст стиха/куплета парит поверх остального содержимого монитора.
+- **Горячая клавиша `Ctrl+Shift+W`** — переключение проекции на второй монитор (когда экранов ровно два), минуя окно подтверждения.
+- **Вкладка Визуал** — независимая настройка оформления стихов и куплетов (цвет/прозрачность фона, цвет текста, загрузка своего шрифта, рамка, отступы, поля, тень текста). Изменения сохраняются и транслируются на проектор вживую.
+- **Показ QR-кода** — переключение QR-кода на выводе проектора.
+- **Массовое редактирование песни** — замена всех куплетов песни разом через текстовое модальное окно.
 
-## Tech stack
+## Стек технологий
 
-| Layer | Technology |
-|-------|-----------|
-| Desktop shell | Wails 3 (alpha) |
-| Backend | Go 1.25, GORM + SQLite (`mattn/go-sqlite3`, CGO) |
-| Projector transport | `r3labs/sse` (SSE server on `:9093`) |
-| Operator UI | SvelteKit |
-| Projector UI | Svelte |
+| Слой | Технология |
+|------|-----------|
+| Десктоп-оболочка | Wails 3 (alpha) |
+| Бэкенд | Go 1.25, GORM + SQLite (`mattn/go-sqlite3`, CGO) |
+| Транспорт проектора | `r3labs/sse` (SSE-сервер на `:9093`) |
+| Интерфейс оператора | SvelteKit |
+| Интерфейс проектора | Svelte |
 
-## Getting started
+## Начало работы
 
-### Prerequisites
+### Требования
 
 - **Go ≥ 1.25**
-- **A C compiler** (e.g. `gcc` / MinGW-w64 on Windows) — the SQLite driver uses CGO, so builds require `CGO_ENABLED=1`.
-- **[Wails 3 CLI](https://v3alpha.wails.io/)** — `wails3`
-- **[Task](https://taskfile.dev/)** — `task` (build orchestration)
-- **Node.js** — for the `frontend/` and `reciever/` builds
+- **Компилятор C** (например, `gcc` / MinGW-w64 на Windows) — драйвер SQLite использует CGO, поэтому для сборки нужен `CGO_ENABLED=1`.
+- **[CLI Wails 3](https://v3alpha.wails.io/)** — `wails3`
+- **[Task](https://taskfile.dev/)** — `task` (оркестрация сборки)
+- **Node.js** — для сборки `frontend/` и `reciever/`
 
-### Development
+### Разработка
 
-Run with hot-reload for both frontend and backend:
+Запуск с горячей перезагрузкой фронтенда и бэкенда:
 
 ```
 task dev
 ```
 
-(equivalent to `wails3 dev`)
+(эквивалент `wails3 dev`)
 
-### Build
+### Сборка
 
-Produce a production executable in the `build/` directory:
+Готовый исполняемый файл в каталоге `build/`:
 
 ```
 wails3 build
 ```
 
-### Test
+### Тесты
 
 ```
-task test          # Go smoke tests (in-memory SQLite)
-cd frontend && npm run check   # operator UI type-check
-cd reciever && npm run check   # projector UI type-check
+task test                      # Go smoke-тесты (SQLite в памяти)
+cd frontend && npm run check   # проверка типов интерфейса оператора
+cd reciever && npm run check   # проверка типов интерфейса проектора
 ```
 
-## Project structure
+## Структура проекта
 
-| Path | Purpose |
-|------|---------|
-| `main.go` | Wails 3 entrypoint — wires the `DbHandler` service, starts the SSE server, opens the main window |
-| `dbHandler.go` | Wails-exposed service: CRUD + show/hide for verses, couplets, QR, and screens |
-| `sse.go` | SSE server on `:9093` — serves the embedded projector app and broadcasts events |
-| `backend/` | GORM models, DB init, JSON seeder |
-| `frontend/` | Operator SvelteKit UI (embedded into the binary) |
-| `reciever/` | Projector output Svelte app (embedded, served on `:9093`) |
-| `build/` | Per-OS build pipeline: Taskfiles, NSIS installer, Linux packaging, icons |
-| `Bible.json` | Seed Synodal translation |
-| `songs.json` | Seed song dump (local, git-ignored) |
+| Путь | Назначение |
+|------|-----------|
+| `main.go` | Точка входа Wails 3 — подключает сервис `DbHandler`, запускает SSE-сервер, открывает главное окно |
+| `dbHandler.go` | Сервис, доступный из Wails: CRUD + показ/скрытие стихов, куплетов, QR и экранов |
+| `sse.go` | SSE-сервер на `:9093` — отдаёт встроенное приложение-проектор и рассылает события |
+| `backend/` | Модели GORM, инициализация БД, наполнение из JSON |
+| `frontend/` | Интерфейс оператора на SvelteKit (встроен в бинарник) |
+| `reciever/` | Приложение-проектор на Svelte (встроено, отдаётся на `:9093`) |
+| `build/` | Пайплайн сборки по ОС: Taskfile'ы, установщик NSIS, пакеты Linux, иконки |
+| `Bible.json` | Сид Синодального перевода |
+| `songs.json` | Сид дампа песен (локальный, в `.gitignore`) |
 
-> The module path is `changeme`; renaming it requires updating every `changeme/...` import.
+> Путь модуля — `changeme`; при переименовании нужно обновить все импорты `changeme/...`.
 
-More detail for each area lives in the per-directory `AGENTS.md` files.
+Подробности по каждой области — в файлах `AGENTS.md` соответствующих каталогов.
