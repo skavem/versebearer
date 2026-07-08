@@ -3,6 +3,7 @@
   import Screens from "./Screens.svelte";
   import Songs from "./Songs.svelte";
   import Visual from "./Visual.svelte";
+  import SettingsModal from "$lib/components/SettingsModal.svelte";
 
   const tabs = [
     {
@@ -26,7 +27,7 @@
   const activeTab = $derived(tabs[activeTabIndex]);
 </script>
 
-<div class="flex w-full flex-grow flex-col bg-white">
+<div class="flex w-full flex-grow flex-col bg-base-100">
   <div class="navbar bg-neutral text-white">
     <div class="navbar-start">
       <button
@@ -54,7 +55,9 @@
         {/each}
       </div>
     </div>
-    <div class="navbar-end"></div>
+    <div class="navbar-end">
+      <SettingsModal />
+    </div>
   </div>
 
   <activeTab.component />

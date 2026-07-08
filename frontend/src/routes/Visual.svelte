@@ -4,7 +4,7 @@
   import { visualStore } from "$lib/stores/visualStore.svelte";
 </script>
 
-<div class="flex flex-col gap-4 p-4 overflow-y-auto">
+<div class="flex h-[calc(100vh-4rem)] flex-col gap-4 overflow-y-auto p-4">
   <FontUploader
     fonts={visualStore.fonts}
     onUpload={(file) => visualStore.uploadFont(file)}

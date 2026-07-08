@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Make the root surfaces follow the active DaisyUI theme so no white shows
+   behind the app in dark mode. */
+@layer base {
+  html,
+  body {
+    @apply bg-base-100 text-base-content;
+  }
+}
+
+/* While a modal is open DaisyUI locks page scroll with
+   `overflow:hidden; scrollbar-gutter:stable`. The reserved gutter shows a
+   strip of the page background on the right (visible now that html/body carry
+   a themed background). This operator UI never scrolls at the document level
+   — each panel scrolls internally — so drop the gutter reservation. */
+:root:has(
+    :is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open])
+  ) {
+  scrollbar-gutter: auto;
+}
+
 @font-face {
   font-family: "Material Icons";
   font-style: normal;
