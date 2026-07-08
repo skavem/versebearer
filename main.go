@@ -71,22 +71,27 @@ func main() {
 		lastScreenMu sync.Mutex
 		lastScreenID string
 	)
-	mainWindow.RegisterHook(events.Common.WindowDidMove, func(_ *application.WindowEvent) {
+	emitCurrentScreen := func(_ *application.WindowEvent) {
 		go func() {
-			scr, err := mainWindow.GetScreen()
-			if err != nil || scr == nil {
+			id := screenIDForWindow(mainWindow)
+			if id == "" {
 				return
 			}
 			lastScreenMu.Lock()
-			if scr.ID == lastScreenID {
+			if id == lastScreenID {
 				lastScreenMu.Unlock()
 				return
 			}
-			lastScreenID = scr.ID
+			lastScreenID = id
 			lastScreenMu.Unlock()
-			dbHandler.emit("current_screen", scr.ID)
+			dbHandler.emit("current_screen", id)
 		}()
-	})
+	}
+	// Track the active screen on both move and resize. Maximizing/restoring or
+	// snapping the window fires WindowDidResize (not always WindowDidMove), and
+	// the screen can change without a plain move.
+	mainWindow.RegisterHook(events.Common.WindowDidMove, emitCurrentScreen)
+	mainWindow.RegisterHook(events.Common.WindowDidResize, emitCurrentScreen)
 
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
 		mainID := mainWindow.ID()

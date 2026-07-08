@@ -549,6 +549,27 @@ func (g *DbHandler) HideQR() {
 	g.qr <- &r
 }
 
+// screenIDForWindow resolves which screen a window sits on by its center
+// point rather than its bounding rectangle. On Windows a maximized window's
+// rect (GetWindowRect) is inflated by the invisible resize border (~8px), so
+// it spills a few pixels onto an adjacent monitor. The bounds-based
+// GetScreen() then ties at distance 0 between both monitors and returns
+// whichever is listed first (usually the primary), so a window maximized on
+// the secondary monitor can be reported as being on the primary. The center
+// point is unambiguously inside a single monitor.
+func screenIDForWindow(w application.Window) string {
+	b := w.Bounds()
+	center := application.Point{
+		X: b.X + b.Width/2,
+		Y: b.Y + b.Height/2,
+	}
+	scr := application.ScreenNearestDipPoint(center)
+	if scr == nil {
+		return ""
+	}
+	return scr.ID
+}
+
 func (g *DbHandler) GetCurrentScreenID() string {
 	if g.app == nil {
 		return ""
@@ -557,11 +578,7 @@ func (g *DbHandler) GetCurrentScreenID() string {
 	if !ok {
 		return ""
 	}
-	scr, err := w.GetScreen()
-	if err != nil || scr == nil {
-		return ""
-	}
-	return scr.ID
+	return screenIDForWindow(w)
 }
 
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string) {
