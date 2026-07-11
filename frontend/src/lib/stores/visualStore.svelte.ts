@@ -44,14 +44,21 @@ function createVisualStore() {
   let fonts = $state<Font[]>([]);
   let loaded = $state(false);
 
-  GetVisualSettings().then((s: VisualSettings) => {
+  async function reload() {
+    const s = await GetVisualSettings();
     verseStyle = s.verseStyle;
     coupletStyle = s.coupletStyle;
     fonts = s.fonts ?? [];
     loaded = true;
-  });
+  }
+
+  reload();
 
   return {
+    // Re-fetch verse/couplet styles from the backend. Called after the active
+    // theme changes (switch/create/duplicate/delete) so the editors reflect it.
+    reload,
+
     get verseStyle() {
       return verseStyle;
     },

@@ -1,10 +1,13 @@
 <script lang="ts">
   import FontUploader from "$lib/components/FontUploader.svelte";
   import StyleEditor from "$lib/components/StyleEditor.svelte";
+  import ThemeBar from "$lib/components/ThemeBar.svelte";
   import { visualStore } from "$lib/stores/visualStore.svelte";
 </script>
 
 <div class="flex h-[calc(100vh-4rem)] flex-col gap-4 overflow-y-auto p-4">
+  <ThemeBar />
+
   <FontUploader
     fonts={visualStore.fonts}
     onUpload={(file) => visualStore.uploadFont(file)}
