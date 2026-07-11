@@ -40,6 +40,11 @@ dev_mode:
       type: blocking
     - cmd: wails3 task build
       type: blocking
+    # Receiver (projector) is served from reciever/dist on disk; keep it rebuilt
+    # on change. Started after the initial build so its first pass doesn't race
+    # the build:reciever dependency.
+    - cmd: wails3 task common:dev:reciever
+      type: background
     - cmd: wails3 task run
       type: primary
 

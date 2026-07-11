@@ -68,6 +68,40 @@ tasks:
     cmds:
       - npm run dev -- --port {{.VITE_PORT}} --strictPort
 
+  install:reciever:deps:
+    summary: Install receiver (projector) dependencies
+    dir: reciever
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/*
+    preconditions:
+      - sh: npm version
+        msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
+    cmds:
+      - npm install
+
+  build:reciever:
+    summary: Build the receiver (projector) project into reciever/dist (embedded by sse.go)
+    dir: reciever
+    sources:
+      - "**/*"
+    generates:
+      - dist/*
+    deps:
+      - task: install:reciever:deps
+    cmds:
+      - npm run build -q
+
+  dev:reciever:
+    summary: Rebuilds the receiver on change (served from reciever/dist on disk in dev)
+    dir: reciever
+    deps:
+      - task: install:reciever:deps
+    cmds:
+      - npm run build -- --watch
+
   update:build-assets:
     summary: Updates the build assets
     dir: build

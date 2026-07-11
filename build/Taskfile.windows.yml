@@ -9,6 +9,7 @@ tasks:
     deps:
       - task: common:go:mod:tidy
       - task: common:build:frontend
+      - task: common:build:reciever
       - task: common:generate:icons
       - task: generate:syso
     cmds:
