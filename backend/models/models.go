@@ -79,6 +79,23 @@ type GlobalState struct {
 	SongScreenId uint
 	SongScreen   Screen
 
+	// ActiveThemeId points at the Theme whose verse/couplet styles are
+	// currently broadcast to the receiver. Edits in the Визуал tab write
+	// straight into this theme. Nil only transiently before the default
+	// theme is seeded (see backend/inits/db.go).
+	ActiveThemeId *uint `json:"activeThemeId"`
+}
+
+// Theme is a named preset of verse+couplet output styles. Exactly one theme
+// is active at a time (GlobalState.ActiveThemeId). The style fields mirror the
+// former flat GlobalState columns 1:1, so the receiver's style_update payload
+// is unchanged. This entity is also the groundwork for future per-output
+// ("зал"/"стрим") themes — each output would carry its own ThemeId.
+type Theme struct {
+	gorm.Model
+	Name      string `json:"name"`
+	IsDefault bool   `json:"isDefault"`
+
 	// Verse style
 	VerseBgColor      string  `json:"verseBgColor"`
 	VerseBgOpacity    float64 `json:"verseBgOpacity"`

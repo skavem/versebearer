@@ -635,194 +635,219 @@ func (g *DbHandler) CloseScreen(name string) {
 
 // --- Visual / style handlers ---
 
-func visualStyleFromGS(gs models.GlobalState, target string) VisualStyle {
+func styleFromTheme(t models.Theme, target string) VisualStyle {
 	if target == "verse" {
 		return VisualStyle{
-			BgColor:      gs.VerseBgColor,
-			BgOpacity:    gs.VerseBgOpacity,
-			TextColor:    gs.VerseTextColor,
-			FontId:       gs.VerseFontId,
-			BorderColor:  gs.VerseBorderColor,
-			BorderWidth:  gs.VerseBorderWidth,
-			BorderRadius: gs.VerseBorderRadius,
-			BorderStyle:  gs.VerseBorderStyle,
-			Padding:      gs.VersePadding,
-			Margin:       gs.VerseMargin,
-			TextShadow:   gs.VerseTextShadow,
+			BgColor:      t.VerseBgColor,
+			BgOpacity:    t.VerseBgOpacity,
+			TextColor:    t.VerseTextColor,
+			FontId:       t.VerseFontId,
+			BorderColor:  t.VerseBorderColor,
+			BorderWidth:  t.VerseBorderWidth,
+			BorderRadius: t.VerseBorderRadius,
+			BorderStyle:  t.VerseBorderStyle,
+			Padding:      t.VersePadding,
+			Margin:       t.VerseMargin,
+			TextShadow:   t.VerseTextShadow,
 		}
 	}
 	return VisualStyle{
-		BgColor:      gs.CoupletBgColor,
-		BgOpacity:    gs.CoupletBgOpacity,
-		TextColor:    gs.CoupletTextColor,
-		FontId:       gs.CoupletFontId,
-		BorderColor:  gs.CoupletBorderColor,
-		BorderWidth:  gs.CoupletBorderWidth,
-		BorderRadius: gs.CoupletBorderRadius,
-		BorderStyle:  gs.CoupletBorderStyle,
-		Padding:      gs.CoupletPadding,
-		Margin:       gs.CoupletMargin,
-		TextShadow:   gs.CoupletTextShadow,
+		BgColor:      t.CoupletBgColor,
+		BgOpacity:    t.CoupletBgOpacity,
+		TextColor:    t.CoupletTextColor,
+		FontId:       t.CoupletFontId,
+		BorderColor:  t.CoupletBorderColor,
+		BorderWidth:  t.CoupletBorderWidth,
+		BorderRadius: t.CoupletBorderRadius,
+		BorderStyle:  t.CoupletBorderStyle,
+		Padding:      t.CoupletPadding,
+		Margin:       t.CoupletMargin,
+		TextShadow:   t.CoupletTextShadow,
 	}
 }
 
-func (g *DbHandler) GetVisualSettings() VisualSettings {
+// styleToMap renders a VisualStyle into the loosely-typed payload the receiver
+// merges (see mergeStyle in sse.go). Central so every broadcast stays in sync.
+func styleToMap(s VisualStyle) map[string]any {
+	return map[string]any{
+		"bgColor": s.BgColor, "bgOpacity": s.BgOpacity,
+		"textColor": s.TextColor, "fontId": s.FontId,
+		"borderColor": s.BorderColor, "borderWidth": s.BorderWidth,
+		"borderRadius": s.BorderRadius, "borderStyle": s.BorderStyle,
+		"padding": s.Padding, "margin": s.Margin, "textShadow": s.TextShadow,
+	}
+}
+
+// loadActiveTheme returns the theme GlobalState.ActiveThemeId points at,
+// falling back to the default theme if the pointer is unset or dangling.
+func loadActiveTheme() (models.Theme, error) {
 	gs := models.GlobalState{}
 	if err := inits.DB.First(&gs, 1).Error; err != nil {
-		log.Println("GetVisualSettings: error reading GlobalState", err)
+		return models.Theme{}, err
+	}
+	var t models.Theme
+	if gs.ActiveThemeId != nil {
+		if err := inits.DB.First(&t, *gs.ActiveThemeId).Error; err == nil {
+			return t, nil
+		}
+	}
+	if err := inits.DB.Where("is_default = ?", true).First(&t).Error; err != nil {
+		return models.Theme{}, err
+	}
+	return t, nil
+}
+
+// broadcastTheme pushes both verse and couplet styles of t to the receiver
+// using the existing style_update mechanism (receiver is unchanged).
+func (g *DbHandler) broadcastTheme(t models.Theme) {
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(styleFromTheme(t, "verse"))}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(styleFromTheme(t, "couplet"))}
+}
+
+func (g *DbHandler) GetVisualSettings() VisualSettings {
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("GetVisualSettings: error loading active theme", err)
 	}
 	var fonts []models.Font
 	inits.DB.Find(&fonts)
 	return VisualSettings{
-		VerseStyle:   visualStyleFromGS(gs, "verse"),
-		CoupletStyle: visualStyleFromGS(gs, "couplet"),
+		VerseStyle:   styleFromTheme(t, "verse"),
+		CoupletStyle: styleFromTheme(t, "couplet"),
 		Fonts:        fonts,
 	}
 }
 
 func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err != nil {
-		log.Println("UpdateVerseStyle: error reading GlobalState", err)
-		return visualStyleFromGS(gs, "verse")
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("UpdateVerseStyle: error loading active theme", err)
+		return styleFromTheme(t, "verse")
 	}
 	updates := map[string]any{}
 	if input.BgColor != nil {
-		gs.VerseBgColor = *input.BgColor
+		t.VerseBgColor = *input.BgColor
 		updates["verse_bg_color"] = *input.BgColor
 	}
 	if input.BgOpacity != nil {
-		gs.VerseBgOpacity = *input.BgOpacity
+		t.VerseBgOpacity = *input.BgOpacity
 		updates["verse_bg_opacity"] = *input.BgOpacity
 	}
 	if input.TextColor != nil {
-		gs.VerseTextColor = *input.TextColor
+		t.VerseTextColor = *input.TextColor
 		updates["verse_text_color"] = *input.TextColor
 	}
 	if input.FontId != nil {
-		gs.VerseFontId = input.FontId
+		t.VerseFontId = input.FontId
 		updates["verse_font_id"] = input.FontId
 	}
 	if input.BorderColor != nil {
-		gs.VerseBorderColor = *input.BorderColor
+		t.VerseBorderColor = *input.BorderColor
 		updates["verse_border_color"] = *input.BorderColor
 	}
 	if input.BorderWidth != nil {
-		gs.VerseBorderWidth = *input.BorderWidth
+		t.VerseBorderWidth = *input.BorderWidth
 		updates["verse_border_width"] = *input.BorderWidth
 	}
 	if input.BorderRadius != nil {
-		gs.VerseBorderRadius = *input.BorderRadius
+		t.VerseBorderRadius = *input.BorderRadius
 		updates["verse_border_radius"] = *input.BorderRadius
 	}
 	if input.BorderStyle != nil {
-		gs.VerseBorderStyle = *input.BorderStyle
+		t.VerseBorderStyle = *input.BorderStyle
 		updates["verse_border_style"] = *input.BorderStyle
 	}
 	if input.Padding != nil {
-		gs.VersePadding = *input.Padding
+		t.VersePadding = *input.Padding
 		updates["verse_padding"] = *input.Padding
 	}
 	if input.Margin != nil {
-		gs.VerseMargin = *input.Margin
+		t.VerseMargin = *input.Margin
 		updates["verse_margin"] = *input.Margin
 	}
 	if input.TextShadow != nil {
-		gs.VerseTextShadow = *input.TextShadow
+		t.VerseTextShadow = *input.TextShadow
 		updates["verse_text_shadow"] = *input.TextShadow
 	}
 	if len(updates) > 0 {
-		if err := inits.DB.Model(&gs).Updates(updates).Error; err != nil {
+		if err := inits.DB.Model(&t).Updates(updates).Error; err != nil {
 			log.Println("UpdateVerseStyle: error saving", err)
 		}
 	}
-	style := visualStyleFromGS(gs, "verse")
-	styleMap := map[string]any{
-		"bgColor": style.BgColor, "bgOpacity": style.BgOpacity,
-		"textColor": style.TextColor, "fontId": style.FontId,
-		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
-		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
-		"padding": style.Padding, "margin": style.Margin, "textShadow": style.TextShadow,
-	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
+	style := styleFromTheme(t, "verse")
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(style)}
 	return style
 }
 
 func (g *DbHandler) UpdateCoupletStyle(input StyleInput) VisualStyle {
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err != nil {
-		log.Println("UpdateCoupletStyle: error reading GlobalState", err)
-		return visualStyleFromGS(gs, "couplet")
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("UpdateCoupletStyle: error loading active theme", err)
+		return styleFromTheme(t, "couplet")
 	}
 	updates := map[string]any{}
 	if input.BgColor != nil {
-		gs.CoupletBgColor = *input.BgColor
+		t.CoupletBgColor = *input.BgColor
 		updates["couplet_bg_color"] = *input.BgColor
 	}
 	if input.BgOpacity != nil {
-		gs.CoupletBgOpacity = *input.BgOpacity
+		t.CoupletBgOpacity = *input.BgOpacity
 		updates["couplet_bg_opacity"] = *input.BgOpacity
 	}
 	if input.TextColor != nil {
-		gs.CoupletTextColor = *input.TextColor
+		t.CoupletTextColor = *input.TextColor
 		updates["couplet_text_color"] = *input.TextColor
 	}
 	if input.FontId != nil {
-		gs.CoupletFontId = input.FontId
+		t.CoupletFontId = input.FontId
 		updates["couplet_font_id"] = input.FontId
 	}
 	if input.BorderColor != nil {
-		gs.CoupletBorderColor = *input.BorderColor
+		t.CoupletBorderColor = *input.BorderColor
 		updates["couplet_border_color"] = *input.BorderColor
 	}
 	if input.BorderWidth != nil {
-		gs.CoupletBorderWidth = *input.BorderWidth
+		t.CoupletBorderWidth = *input.BorderWidth
 		updates["couplet_border_width"] = *input.BorderWidth
 	}
 	if input.BorderRadius != nil {
-		gs.CoupletBorderRadius = *input.BorderRadius
+		t.CoupletBorderRadius = *input.BorderRadius
 		updates["couplet_border_radius"] = *input.BorderRadius
 	}
 	if input.BorderStyle != nil {
-		gs.CoupletBorderStyle = *input.BorderStyle
+		t.CoupletBorderStyle = *input.BorderStyle
 		updates["couplet_border_style"] = *input.BorderStyle
 	}
 	if input.Padding != nil {
-		gs.CoupletPadding = *input.Padding
+		t.CoupletPadding = *input.Padding
 		updates["couplet_padding"] = *input.Padding
 	}
 	if input.Margin != nil {
-		gs.CoupletMargin = *input.Margin
+		t.CoupletMargin = *input.Margin
 		updates["couplet_margin"] = *input.Margin
 	}
 	if input.TextShadow != nil {
-		gs.CoupletTextShadow = *input.TextShadow
+		t.CoupletTextShadow = *input.TextShadow
 		updates["couplet_text_shadow"] = *input.TextShadow
 	}
 	if len(updates) > 0 {
-		if err := inits.DB.Model(&gs).Updates(updates).Error; err != nil {
+		if err := inits.DB.Model(&t).Updates(updates).Error; err != nil {
 			log.Println("UpdateCoupletStyle: error saving", err)
 		}
 	}
-	style := visualStyleFromGS(gs, "couplet")
-	styleMap := map[string]any{
-		"bgColor": style.BgColor, "bgOpacity": style.BgOpacity,
-		"textColor": style.TextColor, "fontId": style.FontId,
-		"borderColor": style.BorderColor, "borderWidth": style.BorderWidth,
-		"borderRadius": style.BorderRadius, "borderStyle": style.BorderStyle,
-		"padding": style.Padding, "margin": style.Margin, "textShadow": style.TextShadow,
-	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
+	style := styleFromTheme(t, "couplet")
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(style)}
 	return style
 }
 
 func (g *DbHandler) ResetVerseStyle() VisualStyle {
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err != nil {
-		log.Println("ResetVerseStyle: error reading GlobalState", err)
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("ResetVerseStyle: error loading active theme", err)
+		return DefaultVerseStyle
 	}
 	d := DefaultVerseStyle
-	if err := inits.DB.Model(&gs).Updates(map[string]any{
+	if err := inits.DB.Model(&t).Updates(map[string]any{
 		"verse_bg_color":      d.BgColor,
 		"verse_bg_opacity":    d.BgOpacity,
 		"verse_text_color":    d.TextColor,
@@ -837,24 +862,18 @@ func (g *DbHandler) ResetVerseStyle() VisualStyle {
 	}).Error; err != nil {
 		log.Println("ResetVerseStyle: error saving", err)
 	}
-	styleMap := map[string]any{
-		"bgColor": d.BgColor, "bgOpacity": d.BgOpacity,
-		"textColor": d.TextColor, "fontId": (*uint)(nil),
-		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
-		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
-		"padding": d.Padding, "margin": d.Margin, "textShadow": d.TextShadow,
-	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleMap}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(d)}
 	return d
 }
 
 func (g *DbHandler) ResetCoupletStyle() VisualStyle {
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err != nil {
-		log.Println("ResetCoupletStyle: error reading GlobalState", err)
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("ResetCoupletStyle: error loading active theme", err)
+		return DefaultCoupletStyle
 	}
 	d := DefaultCoupletStyle
-	if err := inits.DB.Model(&gs).Updates(map[string]any{
+	if err := inits.DB.Model(&t).Updates(map[string]any{
 		"couplet_bg_color":      d.BgColor,
 		"couplet_bg_opacity":    d.BgOpacity,
 		"couplet_text_color":    d.TextColor,
@@ -869,15 +888,123 @@ func (g *DbHandler) ResetCoupletStyle() VisualStyle {
 	}).Error; err != nil {
 		log.Println("ResetCoupletStyle: error saving", err)
 	}
-	styleMap := map[string]any{
-		"bgColor": d.BgColor, "bgOpacity": d.BgOpacity,
-		"textColor": d.TextColor, "fontId": (*uint)(nil),
-		"borderColor": d.BorderColor, "borderWidth": d.BorderWidth,
-		"borderRadius": d.BorderRadius, "borderStyle": d.BorderStyle,
-		"padding": d.Padding, "margin": d.Margin, "textShadow": d.TextShadow,
-	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleMap}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(d)}
 	return d
+}
+
+// --- Theme CRUD ---
+
+func (g *DbHandler) ListThemes() []models.Theme {
+	var themes []models.Theme
+	if err := inits.DB.Order("is_default DESC, id ASC").Find(&themes).Error; err != nil {
+		log.Println("ListThemes: error", err)
+		return nil
+	}
+	return themes
+}
+
+// GetActiveThemeId returns the id of the currently active theme (0 on error).
+func (g *DbHandler) GetActiveThemeId() uint {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil || gs.ActiveThemeId == nil {
+		return 0
+	}
+	return *gs.ActiveThemeId
+}
+
+// applyTheme sets the active theme and broadcasts its styles. Shared by
+// ApplyTheme and the create/duplicate paths (a new copy becomes active so the
+// operator edits it right away).
+func (g *DbHandler) applyTheme(t models.Theme) {
+	gs := models.GlobalState{}
+	if err := inits.DB.First(&gs, 1).Error; err != nil {
+		log.Println("applyTheme: error reading GlobalState", err)
+		return
+	}
+	if err := inits.DB.Model(&gs).Update("active_theme_id", t.ID).Error; err != nil {
+		log.Println("applyTheme: error saving active theme", err)
+		return
+	}
+	g.broadcastTheme(t)
+}
+
+func (g *DbHandler) ApplyTheme(idF float32) []models.Theme {
+	var t models.Theme
+	if err := inits.DB.First(&t, uint(idF)).Error; err != nil {
+		log.Println("ApplyTheme: theme not found", err)
+		return g.ListThemes()
+	}
+	g.applyTheme(t)
+	return g.ListThemes()
+}
+
+// copyThemeStyle clones the style fields of src into a fresh, non-default theme
+// with the given name, persists it, makes it active and returns it.
+func (g *DbHandler) copyThemeStyle(src models.Theme, name string) *models.Theme {
+	nt := src
+	nt.Model = gorm.Model{}
+	nt.Name = name
+	nt.IsDefault = false
+	if err := inits.DB.Create(&nt).Error; err != nil {
+		log.Println("copyThemeStyle: error creating theme", err)
+		return nil
+	}
+	g.applyTheme(nt)
+	return &nt
+}
+
+// CreateTheme adds a new theme as a copy of the currently active one.
+func (g *DbHandler) CreateTheme(name string) *models.Theme {
+	src, err := loadActiveTheme()
+	if err != nil {
+		log.Println("CreateTheme: error loading active theme", err)
+		return nil
+	}
+	return g.copyThemeStyle(src, name)
+}
+
+// DuplicateTheme adds a new theme as a copy of the given theme.
+func (g *DbHandler) DuplicateTheme(idF float32) *models.Theme {
+	var src models.Theme
+	if err := inits.DB.First(&src, uint(idF)).Error; err != nil {
+		log.Println("DuplicateTheme: theme not found", err)
+		return nil
+	}
+	return g.copyThemeStyle(src, src.Name+" (копия)")
+}
+
+func (g *DbHandler) RenameTheme(idF float32, name string) []models.Theme {
+	if err := inits.DB.Model(&models.Theme{}).Where("id = ?", uint(idF)).Update("name", name).Error; err != nil {
+		log.Println("RenameTheme: error", err)
+	}
+	return g.ListThemes()
+}
+
+// DeleteTheme removes a theme. The default theme cannot be deleted. Deleting the
+// active theme falls back to the default theme (re-broadcasting its styles).
+func (g *DbHandler) DeleteTheme(idF float32) []models.Theme {
+	id := uint(idF)
+	var t models.Theme
+	if err := inits.DB.First(&t, id).Error; err != nil {
+		log.Println("DeleteTheme: theme not found", err)
+		return g.ListThemes()
+	}
+	if t.IsDefault {
+		log.Println("DeleteTheme: refusing to delete default theme")
+		return g.ListThemes()
+	}
+	wasActive := g.GetActiveThemeId() == id
+	if err := inits.DB.Delete(&models.Theme{}, id).Error; err != nil {
+		log.Println("DeleteTheme: error deleting", err)
+		return g.ListThemes()
+	}
+	if wasActive {
+		var def models.Theme
+		if err := inits.DB.Where("is_default = ?", true).First(&def).Error; err == nil {
+			g.applyTheme(def)
+		}
+	}
+	return g.ListThemes()
 }
 
 func (g *DbHandler) UploadFont(name, mimeType string, data []byte) *models.Font {
@@ -918,37 +1045,15 @@ func (g *DbHandler) DeleteFont(idF float32) {
 		log.Println("DeleteFont: error deleting font", err)
 		return
 	}
-	// Null out any style FK pointing to this font
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err == nil {
-		updates := map[string]any{}
-		if gs.VerseFontId != nil && *gs.VerseFontId == id {
-			updates["verse_font_id"] = nil
-		}
-		if gs.CoupletFontId != nil && *gs.CoupletFontId == id {
-			updates["couplet_font_id"] = nil
-		}
-		if len(updates) > 0 {
-			inits.DB.Model(&gs).Updates(updates)
-			inits.DB.First(&gs, 1)
-			verseMap := map[string]any{
-				"bgColor": gs.VerseBgColor, "bgOpacity": gs.VerseBgOpacity,
-				"textColor": gs.VerseTextColor, "fontId": gs.VerseFontId,
-				"borderColor": gs.VerseBorderColor, "borderWidth": gs.VerseBorderWidth,
-				"borderRadius": gs.VerseBorderRadius, "borderStyle": gs.VerseBorderStyle,
-				"padding": gs.VersePadding, "margin": gs.VerseMargin, "textShadow": gs.VerseTextShadow,
-			}
-			g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: verseMap}
-			coupletMap := map[string]any{
-				"bgColor": gs.CoupletBgColor, "bgOpacity": gs.CoupletBgOpacity,
-				"textColor": gs.CoupletTextColor, "fontId": gs.CoupletFontId,
-				"borderColor": gs.CoupletBorderColor, "borderWidth": gs.CoupletBorderWidth,
-				"borderRadius": gs.CoupletBorderRadius, "borderStyle": gs.CoupletBorderStyle,
-				"padding": gs.CoupletPadding, "margin": gs.CoupletMargin, "textShadow": gs.CoupletTextShadow,
-			}
-			g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: coupletMap}
-		}
+	// Null out any theme style FK pointing to this font, across all themes.
+	inits.DB.Model(&models.Theme{}).Where("verse_font_id = ?", id).Update("verse_font_id", nil)
+	inits.DB.Model(&models.Theme{}).Where("couplet_font_id = ?", id).Update("couplet_font_id", nil)
+	// Re-broadcast the active theme so a live projection using the deleted font
+	// falls back immediately.
+	if t, err := loadActiveTheme(); err == nil {
+		g.broadcastTheme(t)
 	}
+
 	var fonts []models.Font
 	inits.DB.Find(&fonts)
 	g.styleB <- &StyleEvent{Type: "fonts_changed", Fonts: fonts}

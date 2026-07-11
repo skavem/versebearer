@@ -34,11 +34,10 @@ func watchChannels(
 	var lastCoupletStyle VisualStyle
 	var lastFonts []models.Font
 
-	// Initialize style cache from DB
-	gs := models.GlobalState{}
-	if err := inits.DB.First(&gs, 1).Error; err == nil {
-		lastVerseStyle = visualStyleFromGS(gs, "verse")
-		lastCoupletStyle = visualStyleFromGS(gs, "couplet")
+	// Initialize style cache from the active theme
+	if t, err := loadActiveTheme(); err == nil {
+		lastVerseStyle = styleFromTheme(t, "verse")
+		lastCoupletStyle = styleFromTheme(t, "couplet")
 	} else {
 		lastVerseStyle = DefaultVerseStyle
 		lastCoupletStyle = DefaultCoupletStyle

@@ -23,47 +23,66 @@ func init() {
 		&models.Song{},
 		&models.Couplet{},
 		&models.Screen{},
+		&models.Theme{},
 		&models.GlobalState{},
 		&models.Font{},
 	)
 
-	// Ensure GlobalState row 1 exists and seed style defaults on first launch
+	// Ensure GlobalState row 1 exists
 	gs := models.GlobalState{}
 	db.FirstOrCreate(&gs, models.GlobalState{Model: gorm.Model{ID: 1}})
 
-	if gs.Version < "2" {
+	// version < "4": output styles moved from flat GlobalState columns into a
+	// first-class Theme. Seed the "По умолчанию" theme once and point
+	// ActiveThemeId at it. For an upgraded DB the legacy verse_*/couplet_*
+	// columns still exist — carry the user's tuned values over. For a fresh DB
+	// those columns were never created — fall back to hardcoded defaults.
+	if gs.Version < "4" {
+		var seed models.Theme
+		if db.Migrator().HasColumn(&models.GlobalState{}, "verse_bg_color") {
+			// Legacy style columns still live on global_states — GORM maps them
+			// straight into the Theme's matching columns.
+			db.Table("global_states").Where("id = ?", 1).Scan(&seed)
+			seed.Model = gorm.Model{}
+		} else {
+			seed = defaultTheme()
+		}
+		seed.Name = "По умолчанию"
+		seed.IsDefault = true
+		db.Create(&seed)
 		db.Model(&gs).Updates(map[string]any{
-			"verse_bg_color":       "#000000",
-			"verse_bg_opacity":     0.95,
-			"verse_text_color":     "#ffffff",
-			"verse_font_id":        nil,
-			"verse_border_color":   "#000000",
-			"verse_border_width":   0,
-			"verse_border_radius":  16,
-			"verse_border_style":   "solid",
-			"verse_padding":        32,
-			"verse_text_shadow":    "",
-			"couplet_bg_color":     "#000000",
-			"couplet_bg_opacity":   0.95,
-			"couplet_text_color":   "#ffffff",
-			"couplet_font_id":      nil,
-			"couplet_border_color": "#000000",
-			"couplet_border_width": 0,
-			"couplet_border_radius": 0,
-			"couplet_border_style": "solid",
-			"couplet_padding":      64,
-			"couplet_text_shadow":  "",
-			"version":              "2",
-		})
-	}
-
-	if gs.Version < "3" {
-		db.Model(&gs).Updates(map[string]any{
-			"verse_margin":   0,
-			"couplet_margin": 0,
-			"version":        "3",
+			"active_theme_id": seed.ID,
+			"version":         "4",
 		})
 	}
 
 	DB = db
+}
+
+// defaultTheme is the hardcoded style used to seed the default theme on a fresh
+// install (mirrors DefaultVerseStyle/DefaultCoupletStyle in the main package).
+func defaultTheme() models.Theme {
+	return models.Theme{
+		VerseBgColor:      "#000000",
+		VerseBgOpacity:    0.95,
+		VerseTextColor:    "#ffffff",
+		VerseBorderColor:  "#000000",
+		VerseBorderWidth:  0,
+		VerseBorderRadius: 16,
+		VerseBorderStyle:  "solid",
+		VersePadding:      32,
+		VerseMargin:       0,
+		VerseTextShadow:   "",
+
+		CoupletBgColor:      "#000000",
+		CoupletBgOpacity:    0.95,
+		CoupletTextColor:    "#ffffff",
+		CoupletBorderColor:  "#000000",
+		CoupletBorderWidth:  0,
+		CoupletBorderRadius: 0,
+		CoupletBorderStyle:  "solid",
+		CoupletPadding:      64,
+		CoupletMargin:       0,
+		CoupletTextShadow:   "",
+	}
 }
