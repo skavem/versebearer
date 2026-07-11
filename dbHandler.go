@@ -48,10 +48,25 @@ type VisualStyle struct {
 	TextShadow   string  `json:"textShadow"`
 }
 
+// Backdrop is the theme's single always-on full-screen background layer.
+type Backdrop struct {
+	BgType     string `json:"bgType"`
+	BgGradient string `json:"bgGradient"`
+	BgImageId  *uint  `json:"bgImageId"`
+}
+
+type BackdropInput struct {
+	BgType     *string `json:"bgType"`
+	BgGradient *string `json:"bgGradient"`
+	BgImageId  *uint   `json:"bgImageId"`
+}
+
 type VisualSettings struct {
-	VerseStyle   VisualStyle   `json:"verseStyle"`
-	CoupletStyle VisualStyle   `json:"coupletStyle"`
-	Fonts        []models.Font `json:"fonts"`
+	VerseStyle   VisualStyle    `json:"verseStyle"`
+	CoupletStyle VisualStyle    `json:"coupletStyle"`
+	Backdrop     Backdrop       `json:"backdrop"`
+	Fonts        []models.Font  `json:"fonts"`
+	Images       []models.Image `json:"images"`
 }
 
 var DefaultVerseStyle = VisualStyle{
@@ -635,6 +650,15 @@ func (g *DbHandler) CloseScreen(name string) {
 
 // --- Visual / style handlers ---
 
+// normalizeBgType maps the empty zero-value (legacy themes predating backdrops)
+// to "none" so the rest of the pipeline always sees a valid value.
+func normalizeBgType(t string) string {
+	if t == "" {
+		return "none"
+	}
+	return t
+}
+
 func styleFromTheme(t models.Theme, target string) VisualStyle {
 	if target == "verse" {
 		return VisualStyle{
@@ -663,6 +687,21 @@ func styleFromTheme(t models.Theme, target string) VisualStyle {
 		Padding:      t.CoupletPadding,
 		Margin:       t.CoupletMargin,
 		TextShadow:   t.CoupletTextShadow,
+	}
+}
+
+// backdropFromTheme extracts the theme's single always-on backdrop.
+func backdropFromTheme(t models.Theme) Backdrop {
+	return Backdrop{
+		BgType:     normalizeBgType(t.BgType),
+		BgGradient: t.BgGradient,
+		BgImageId:  t.BgImageId,
+	}
+}
+
+func backdropToMap(b Backdrop) map[string]any {
+	return map[string]any{
+		"bgType": b.BgType, "bgGradient": b.BgGradient, "bgImageId": b.BgImageId,
 	}
 }
 
@@ -702,6 +741,7 @@ func loadActiveTheme() (models.Theme, error) {
 func (g *DbHandler) broadcastTheme(t models.Theme) {
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(styleFromTheme(t, "verse"))}
 	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(styleFromTheme(t, "couplet"))}
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(backdropFromTheme(t))}
 }
 
 func (g *DbHandler) GetVisualSettings() VisualSettings {
@@ -711,11 +751,65 @@ func (g *DbHandler) GetVisualSettings() VisualSettings {
 	}
 	var fonts []models.Font
 	inits.DB.Find(&fonts)
+	var images []models.Image
+	inits.DB.Find(&images)
 	return VisualSettings{
 		VerseStyle:   styleFromTheme(t, "verse"),
 		CoupletStyle: styleFromTheme(t, "couplet"),
+		Backdrop:     backdropFromTheme(t),
 		Fonts:        fonts,
+		Images:       images,
 	}
+}
+
+// UpdateBackdrop writes the given fields into the active theme's single backdrop
+// and broadcasts them (always-on, independent of verse/couplet visibility).
+func (g *DbHandler) UpdateBackdrop(input BackdropInput) Backdrop {
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("UpdateBackdrop: error loading active theme", err)
+		return backdropFromTheme(t)
+	}
+	updates := map[string]any{}
+	if input.BgType != nil {
+		t.BgType = *input.BgType
+		updates["bg_type"] = *input.BgType
+	}
+	if input.BgGradient != nil {
+		t.BgGradient = *input.BgGradient
+		updates["bg_gradient"] = *input.BgGradient
+	}
+	if input.BgImageId != nil {
+		t.BgImageId = input.BgImageId
+		updates["bg_image_id"] = input.BgImageId
+	}
+	if len(updates) > 0 {
+		if err := inits.DB.Model(&t).Updates(updates).Error; err != nil {
+			log.Println("UpdateBackdrop: error saving", err)
+		}
+	}
+	b := backdropFromTheme(t)
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b)}
+	return b
+}
+
+// ResetBackdrop turns the active theme's backdrop off.
+func (g *DbHandler) ResetBackdrop() Backdrop {
+	t, err := loadActiveTheme()
+	if err != nil {
+		log.Println("ResetBackdrop: error loading active theme", err)
+		return Backdrop{BgType: "none"}
+	}
+	if err := inits.DB.Model(&t).Updates(map[string]any{
+		"bg_type":     "none",
+		"bg_gradient": "",
+		"bg_image_id": nil,
+	}).Error; err != nil {
+		log.Println("ResetBackdrop: error saving", err)
+	}
+	b := Backdrop{BgType: "none"}
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b)}
+	return b
 }
 
 func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
@@ -1065,4 +1159,57 @@ func (g *DbHandler) getFontDataInternal(id uint) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return f.Data, f.MimeType, nil
+}
+
+// --- Backdrop images ---
+
+func (g *DbHandler) UploadImage(name, mimeType string, data []byte) *models.Image {
+	if len(data) > 10*1024*1024 {
+		log.Println("UploadImage: file too large", len(data))
+		return nil
+	}
+	validMimes := map[string]bool{
+		"image/png":  true,
+		"image/jpeg": true,
+		"image/webp": true,
+		"image/gif":  true,
+	}
+	if !validMimes[mimeType] {
+		log.Println("UploadImage: invalid mime type", mimeType)
+		return nil
+	}
+	image := models.Image{
+		Name:      name,
+		MimeType:  mimeType,
+		Data:      data,
+		SizeBytes: len(data),
+	}
+	if err := inits.DB.Create(&image).Error; err != nil {
+		log.Println("UploadImage: error creating image", err)
+		return nil
+	}
+	return &image
+}
+
+func (g *DbHandler) DeleteImage(idF float32) {
+	id := uint(idF)
+	if err := inits.DB.Delete(&models.Image{}, id).Error; err != nil {
+		log.Println("DeleteImage: error deleting image", err)
+		return
+	}
+	// Null out any theme backdrop FK pointing to this image, across all themes.
+	inits.DB.Model(&models.Theme{}).Where("bg_image_id = ?", id).Update("bg_image_id", nil)
+	// Re-broadcast the active theme so a live projection using the deleted image
+	// falls back immediately.
+	if t, err := loadActiveTheme(); err == nil {
+		g.broadcastTheme(t)
+	}
+}
+
+func (g *DbHandler) getImageDataInternal(id uint) ([]byte, string, error) {
+	var im models.Image
+	if err := inits.DB.First(&im, id).Error; err != nil {
+		return nil, "", err
+	}
+	return im.Data, im.MimeType, nil
 }

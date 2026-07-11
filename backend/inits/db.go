@@ -26,6 +26,7 @@ func init() {
 		&models.Theme{},
 		&models.GlobalState{},
 		&models.Font{},
+		&models.Image{},
 	)
 
 	// Ensure GlobalState row 1 exists
@@ -84,5 +85,7 @@ func defaultTheme() models.Theme {
 		CoupletPadding:      64,
 		CoupletMargin:       0,
 		CoupletTextShadow:   "",
+
+		BgType: "none",
 	}
 }

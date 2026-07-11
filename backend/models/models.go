@@ -120,9 +120,27 @@ type Theme struct {
 	CoupletPadding      int     `json:"coupletPadding"`
 	CoupletMargin       int     `json:"coupletMargin"`
 	CoupletTextShadow   string  `json:"coupletTextShadow"`
+
+	// Backdrop — a single, always-on full-screen layer behind the text cards,
+	// constant for the whole theme (not tied to verse/couplet visibility).
+	// BgType is "none" | "gradient" | "image" (empty == none). BgGradient holds
+	// the gradient as JSON the receiver rebuilds into CSS.
+	BgType     string `json:"bgType"`
+	BgGradient string `json:"bgGradient"`
+	BgImageId  *uint  `json:"bgImageId"`
 }
 
 type Font struct {
+	gorm.Model
+	Name      string `json:"name"`
+	MimeType  string `json:"mimeType"`
+	Data      []byte `json:"-"`
+	SizeBytes int    `json:"sizeBytes"`
+}
+
+// Image is an uploaded backdrop picture, served by /image/{id} (mirrors Font
+// and /font/{id}). Referenced from a theme via Verse/CoupletBgImageId.
+type Image struct {
 	gorm.Model
 	Name      string `json:"name"`
 	MimeType  string `json:"mimeType"`

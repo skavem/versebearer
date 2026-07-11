@@ -33,11 +33,13 @@ func watchChannels(
 	var lastVerseStyle VisualStyle
 	var lastCoupletStyle VisualStyle
 	var lastFonts []models.Font
+	lastBackdrop := backdropToMap(Backdrop{BgType: "none"})
 
-	// Initialize style cache from the active theme
+	// Initialize style + backdrop cache from the active theme
 	if t, err := loadActiveTheme(); err == nil {
 		lastVerseStyle = styleFromTheme(t, "verse")
 		lastCoupletStyle = styleFromTheme(t, "couplet")
+		lastBackdrop = backdropToMap(backdropFromTheme(t))
 	} else {
 		lastVerseStyle = DefaultVerseStyle
 		lastCoupletStyle = DefaultCoupletStyle
@@ -54,6 +56,7 @@ func watchChannels(
 			event["qr"] = qr
 			event["verseStyle"] = lastVerseStyle
 			event["coupletStyle"] = lastCoupletStyle
+			event["backdrop"] = lastBackdrop
 			event["fonts"] = lastFonts
 		case verse := <-bibleChannel:
 			event["type"] = "hide_verse"
@@ -90,6 +93,9 @@ func watchChannels(
 				} else if styleEvt.Target == "couplet" {
 					mergeStyle(&lastCoupletStyle, styleEvt.Style)
 				}
+			} else if styleEvt.Type == "backdrop_update" {
+				event["style"] = styleEvt.Style
+				lastBackdrop = styleEvt.Style
 			} else if styleEvt.Type == "fonts_changed" {
 				event["fonts"] = styleEvt.Fonts
 				lastFonts = styleEvt.Fonts
@@ -199,6 +205,27 @@ func createSSE(
 		w.Header().Set("Content-Type", f.MimeType)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Write(f.Data)
+	})
+
+	mux.HandleFunc("/image/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/image/")
+		idStr := path
+		if i := strings.IndexByte(path, '.'); i >= 0 {
+			idStr = path[:i]
+		}
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		var im models.Image
+		if err := db.First(&im, uint(id)).Error; err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", im.MimeType)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Write(im.Data)
 	})
 
 	mux.Handle("/", fsServer)
