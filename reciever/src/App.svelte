@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { backdropCss } from "./background";
   import ShownCouplet from "./lib/components/ShownCouplet.svelte";
   import ShownVerse from "./lib/components/ShownVerse.svelte";
-  import type { IFont, IShownCouplet, IShownVerse, IVisualStyle } from "./types";
+  import type { IBackdrop, IFont, IShownCouplet, IShownVerse, IVisualStyle } from "./types";
 
   const defaultVerseStyle: IVisualStyle = {
     bgColor: "#000000",
@@ -46,6 +47,9 @@
   let verseStyle = $state<IVisualStyle>({ ...defaultVerseStyle });
   let coupletStyle = $state<IVisualStyle>({ ...defaultCoupletStyle });
   let fonts = $state<IFont[]>([]);
+  let backdrop = $state<IBackdrop>({ bgType: "none", bgGradient: "", bgImageId: null });
+
+  const backdropStyle = $derived(backdropCss(backdrop));
 
   function cssSafe(s: string): string {
     return s.replace(/[\\"]/g, "\\$&").replace(/\s/g, " ").replace(/[;{}]/g, "");
@@ -100,6 +104,7 @@
           qr = data.qr;
           if (data.verseStyle) verseStyle = data.verseStyle;
           if (data.coupletStyle) coupletStyle = data.coupletStyle;
+          if (data.backdrop) backdrop = data.backdrop;
           if (data.fonts) {
             fonts = data.fonts;
             injectFonts(data.fonts);
@@ -112,6 +117,9 @@
             coupletStyle = mergeStyle(coupletStyle, data.style);
           }
           break;
+        case "backdrop_update":
+          if (data.style) backdrop = data.style;
+          break;
         case "fonts_changed":
           if (data.fonts) {
             fonts = data.fonts;
@@ -123,5 +131,17 @@
   });
 </script>
 
+{#if backdropStyle}
+  <div class="backdrop" style:background={backdropStyle}></div>
+{/if}
+
 <ShownVerse {verse} style={verseStyle} {fonts} />
 <ShownCouplet {couplet} {qr} style={coupletStyle} {fonts} />
+
+<style>
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+</style>

@@ -103,6 +103,7 @@
     position: absolute;
     top: 50%;
     left: 0;
+    z-index: 1;
 
     display: flex;
     justify-content: center;

@@ -27,6 +27,13 @@ export type IVisualStyle = {
   textShadow: string;
 }
 
+// Theme-level always-on full-screen backdrop, independent of verse/couplet.
+export type IBackdrop = {
+  bgType: string;
+  bgGradient: string;
+  bgImageId: number | null;
+}
+
 export type IFont = {
   ID: number;
   name: string;
