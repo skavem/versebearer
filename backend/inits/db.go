@@ -74,6 +74,21 @@ func init() {
 			ScreenID:    "",
 		})
 		db.Model(&gs).Update("version", "5")
+		gs.Version = "5"
+	}
+
+	// version < "6": Output gained a window mode (models.Output.Mode) alongside
+	// the pre-existing frameless/always-on-top display mode. Existing rows
+	// predate the column, so their Mode is "" — pin it to "display" explicitly
+	// and give WinWidth/WinHeight sane defaults for if the operator ever
+	// switches that row to window mode later.
+	if gs.Version < "6" {
+		db.Model(&models.Output{}).Where("mode = ?", "").Updates(map[string]any{
+			"mode":       "display",
+			"win_width":  1280,
+			"win_height": 720,
+		})
+		db.Model(&gs).Update("version", "6")
 	}
 
 	DB = db

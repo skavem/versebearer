@@ -160,4 +160,21 @@ type Output struct {
 	ThemeId     *uint  `json:"themeId"`     // theme rendering this output; nil => default theme
 	ScreenID    string `json:"screenId"`    // Wails Screen.ID of the target monitor; "" = unassigned
 	Transparent bool   `json:"transparent"` // transparent window for OBS capture
+
+	// Mode selects how the projector window is presented: "display" (frameless,
+	// always-on-top, fills the assigned monitor — the original behavior) or
+	// "window" (a normal moveable/resizable window). Empty is treated as
+	// "display" so pre-existing rows (seeded before this field existed) keep
+	// their current behavior unchanged.
+	Mode string `json:"mode"`
+
+	// The remaining fields only apply in "window" mode; "display" mode ignores
+	// them (it is always frameless + always-on-top, sized to the monitor).
+	WinX        int  `json:"winX"`
+	WinY        int  `json:"winY"`
+	WinWidth    int  `json:"winWidth"`    // 0 => default 1280
+	WinHeight   int  `json:"winHeight"`   // 0 => default 720
+	WinPlaced   bool `json:"winPlaced"`   // true once WinX/WinY hold a real position (first move/resize)
+	Frameless   bool `json:"frameless"`   // window mode: window has no OS frame
+	AlwaysOnTop bool `json:"alwaysOnTop"` // window mode: window floats above others
 }
