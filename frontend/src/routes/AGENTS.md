@@ -14,7 +14,7 @@ SvelteKit routes. The whole operator app lives at `/`, with three tab views impo
 | `+page.svelte` | Navbar + tab switcher. `activeTabIndex` default = 1 (Песни/Songs) |
 | `Bible.svelte` | Bible navigation tab: translation/book/chapter selectors, verse list, recent-history sidebar |
 | `Songs.svelte` | Song picker + couplet display tab + favorites list + QR toggle |
-| `Screens.svelte` | Lists OS displays from `@wailsio/runtime` `Screens.GetAll()`; toggle projector windows |
+| `Screens.svelte` | Lists persisted `Output` entities (`outputStore`); each is assigned an OS monitor (`@wailsio/runtime` `Screens.GetAll()` as a picklist) and a theme, then started/stopped as a projector window |
 
 ## For AI Agents
 
@@ -33,7 +33,7 @@ SvelteKit routes. The whole operator app lives at `/`, with three tab views impo
 ## Dependencies
 
 ### Internal
-- `$lib/stores/BibleStore.svelte` (Bible tab), `$lib/stores/songsStore.svelte` (Songs tab), `$lib/stores/screenStore.svelte` (Screens tab).
+- `$lib/stores/BibleStore.svelte` (Bible tab), `$lib/stores/songsStore.svelte` (Songs tab), `$lib/stores/outputStore.svelte` (Screens tab).
 - `$lib/components/*` for List/Select/CoupletsList/etc.
 
 <!-- MANUAL: -->

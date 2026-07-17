@@ -1,24 +1,26 @@
 <script lang="ts">
-  import { screenId, screenStore } from "$lib/stores/screenStore.svelte";
+  import { outputStore } from "$lib/stores/outputStore.svelte";
   import type { Screens } from "@wailsio/runtime";
+  import type { Output } from "$lib/bindings/changeme/backend/models";
+  import MuiIcon from "./MuiIcon.svelte";
 
   type Screen = Screens.Screen;
 
-  const screens = $derived(screenStore.list);
+  const monitors = $derived(outputStore.monitors);
 
   const VIEW_W = 640;
   const VIEW_H = 200;
   const PAD = 16;
 
   const bounds = $derived.by(() => {
-    if (screens.length === 0) {
+    if (monitors.length === 0) {
       return { minX: 0, minY: 0, maxX: 1, maxY: 1, scale: 1 };
     }
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const s of screens) {
+    for (const s of monitors) {
       minX = Math.min(minX, s.Bounds.X);
       minY = Math.min(minY, s.Bounds.Y);
       maxX = Math.max(maxX, s.Bounds.X + s.Bounds.Width);
@@ -46,18 +48,27 @@
     };
   }
 
+  // First output assigned to this monitor, if any — the minimap toggles
+  // that single output on click. Monitors without an assigned output are
+  // shown but not interactive.
+  function outputFor(s: Screen): Output | undefined {
+    return outputStore.outputs.find((o) => o.screenId === s.ID);
+  }
+
   function toggle(s: Screen) {
-    screenStore.requestToggle(s);
+    const o = outputFor(s);
+    if (o) outputStore.requestToggle(o);
   }
 </script>
 
-<div class="rounded-2xl border border-base-300 bg-base-200/40 p-4">
-  <div class="mb-3 flex items-baseline justify-between">
-    <h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/70">
+<div class="flex flex-col gap-3 rounded-xl border border-base-300 bg-base-100 p-4 shadow-sm">
+  <div class="flex items-baseline justify-between border-b border-base-300 pb-2.5">
+    <div class="section-head">
+      <MuiIcon name="dashboard" style="font-size: 1rem" />
       Расположение мониторов
-    </h3>
-    <span class="text-xs text-base-content/50">
-      кликни — переключить трансляцию
+    </div>
+    <span class="text-xs text-base-content/40">
+      клик — переключить трансляцию назначенного выхода
     </span>
   </div>
   <svg
@@ -66,16 +77,16 @@
     role="img"
     aria-label="Спатиал-карта мониторов"
   >
-    {#each screens as s, i (s.ID)}
+    {#each monitors as s, i (s.ID)}
       {@const rect = project(s)}
-      {@const id = screenId(s)}
-      {@const projecting = screenStore.activeScreens.includes(id)}
-      {@const isCurrent = screenStore.currentScreenID === s.ID}
+      {@const output = outputFor(s)}
+      {@const projecting = !!output && outputStore.isActive(output)}
+      {@const isCurrent = outputStore.currentScreenID === s.ID}
       <g
-        class="cursor-pointer"
+        class={output ? "cursor-pointer" : "cursor-default"}
         onclick={() => toggle(s)}
         onkeydown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (output && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             toggle(s);
           }
@@ -93,9 +104,10 @@
           ry="6"
           class={[
             "transition-all",
-            projecting ? "fill-neutral" : "fill-base-100",
+            projecting ? "fill-neutral" : "fill-base-200",
             "stroke-2",
             isCurrent ? "stroke-secondary" : "stroke-base-300",
+            !output && "opacity-50",
           ]}
         />
         <text
@@ -120,7 +132,7 @@
             projecting ? "fill-neutral-content/80" : "fill-base-content/60",
           ]}
         >
-          {s.Bounds.Width}×{s.Bounds.Height}
+          {output ? output.name : s.Bounds.Width + "×" + s.Bounds.Height}
         </text>
         {#if s.IsPrimary}
           <text
@@ -148,3 +160,16 @@
     {/each}
   </svg>
 </div>
+
+<style>
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: oklch(var(--bc) / 0.6);
+  }
+</style>

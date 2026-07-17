@@ -1,6 +1,6 @@
 <script>
 	import '../app.css';
-	import { screenStore } from '$lib/stores/screenStore.svelte';
+	import { outputStore } from '$lib/stores/outputStore.svelte';
 	import { settingsStore } from '$lib/stores/settingsStore.svelte';
 
 	const { children } = $props();
@@ -14,13 +14,14 @@
 		document.documentElement.setAttribute('data-theme', settingsStore.themeName);
 	});
 
-	// Global shortcut: Ctrl+Shift+W toggles projection on the non-primary screen.
+	// Global shortcut: Ctrl+Shift+W toggles projection on the output assigned
+	// to the non-primary monitor (see outputStore.toggleSecondary).
 	// Uses event.code ("KeyW") so it fires on any keyboard layout (e.g. Cyrillic "ц").
 	$effect(() => {
 		function onKeyDown(/** @type {KeyboardEvent} */ e) {
 			if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyW') {
 				e.preventDefault();
-				screenStore.toggleSecondary();
+				outputStore.toggleSecondary();
 			}
 		}
 		document.addEventListener('keydown', onKeyDown);

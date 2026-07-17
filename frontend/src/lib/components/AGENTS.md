@@ -20,7 +20,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 | `CreateSongModal.svelte` | Modal: number (auto-incremented from last) + title → `CreateSong`. Sets the returned song as active so the list scrolls to it |
 | `CreateEditCoupletModal.svelte` | Modal for both create and edit. Quick-fill buttons "Куплет"/"Припев"/"Бридж" for the label |
 | `EditSongTextModal.svelte` | Whole-song bulk-edit modal: textarea showing all couplets serialized via `$lib/songText#serializeSongText` (label-then-text, blocks separated by blank line). Save parses the text via `parseSongText` and calls `ReplaceCouplets(songId, blocks)` which atomically wipes and recreates the song's couplets |
-| `ScreenToggler.svelte` | Button per OS display. Toggles a `ShowScreen`/`CloseScreen` pair; uses `screen <ID>` as window name |
+| `OutputCard.svelte` | Card per persisted `Output` entity. Inline-editable name, monitor/theme `PopoverSelect` dropdowns, transparent toggle (disabled while live), Start/StopOutput button, inline delete confirm |
 | `MuiIcon.svelte` | Renders a `<span class="material-icons">` with a typed `name` prop |
 | `MuiIcon.ts` | `const iconNames = [...] as const; export type MuiIconNames = (typeof iconNames)[number]` — huge string literal union of valid icon names |
 
@@ -47,7 +47,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 - `$lib/stores/*` for reactive state.
 
 ### External
-- `@wailsio/runtime` `Screens` namespace (ScreenToggler).
+- `@wailsio/runtime` `Screens` namespace (via `outputStore`, consumed by `OutputCard`/`ScreenMiniMap`).
 - Svelte transitions (`fade`/`fly`).
 
 <!-- MANUAL: -->

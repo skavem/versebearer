@@ -11,7 +11,7 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 |------|-------------|
 | `BibleStore.svelte.ts` | Translation → Book → Chapter → Verse cascade. Side-effect on `set active` fetches next level. Subscribes to Wails `show_verse`/`hide_verse` events. Maintains a `history` (most recent first) of every shown verse |
 | `songsStore.svelte.ts` | Songs + couplets + favorites + QR. Subscribes to `show_couplet`/`hide_couplet`/`songs_update`/`song_update`. Favorites are local-only (no DB), keyed by random `localId` so the same song can be queued multiple times |
-| `screenStore.svelte.ts` | OS displays list (from `@wailsio/runtime` `Screens.GetAll()`) + locally-tracked `activeScreens: string[]` of opened projector window names |
+| `outputStore.svelte.ts` | Persisted `Output` entities (`ListOutputs`/`CreateOutput`/etc.) + OS monitor list (`@wailsio/runtime` `Screens.GetAll()`, used only as a picklist for `SetOutputScreen`) + locally-tracked `activeOutputIds: number[]` of outputs with an open projector window |
 | `cycle.ts` | `cycleIndex<T extends {ID: number}>(list, active, delta)` — shared helper for `next/prev` across chapters/verses/couplets. Returns `undefined` at bounds, no wrap-around |
 
 ## For AI Agents
