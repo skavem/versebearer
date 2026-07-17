@@ -16,7 +16,7 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 | `Bible.json` | Seed Synodal translation (books/chapters/verses) consumed by `backend/filler` |
 | `songs.json` | Seed song dump consumed by `backend/filler` (untracked, in `.gitignore`) |
 | `test.db` | Local SQLite DB (created by `backend/inits` at startup, ignored) |
-| `.env` | `DEV=true` toggles SSE static-file serving from disk vs embedded FS |
+| `.env` | Optional, dev-only. `DEV=true` serves the receiver from disk instead of the embedded FS. Absent in production builds — `godotenv.Load()` is best-effort, a missing file is not fatal |
 
 ## Subdirectories
 | Directory | Purpose |

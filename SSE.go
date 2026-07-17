@@ -161,10 +161,10 @@ func createSSE(
 	styleChannel chan *StyleEvent,
 	db *gorm.DB,
 ) {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file", err.Error())
-	}
+	// .env is a dev convenience only (DEV=true serves the receiver from disk
+	// instead of the embedded FS). Production builds ship without it, so a
+	// missing file is fine — fall back to the real process environment.
+	_ = godotenv.Load()
 	isDev := os.Getenv("DEV")
 
 	server := sse.New()
