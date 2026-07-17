@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strconv"
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
@@ -18,6 +19,10 @@ type StyleEvent struct {
 	Target string         `json:"target,omitempty"`
 	Style  map[string]any `json:"style,omitempty"`
 	Fonts  []models.Font  `json:"fonts,omitempty"`
+	// ThemeId is the theme being edited when Type is style_update/backdrop_update.
+	// watchChannels uses it to compute which outputs (outputIds) the change
+	// should reach — see outputIdsForTheme in sse.go.
+	ThemeId uint `json:"themeId,omitempty"`
 }
 
 type StyleInput struct {
@@ -596,10 +601,14 @@ func (g *DbHandler) GetCurrentScreenID() string {
 	return screenIDForWindow(w)
 }
 
-func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transparent bool) {
+// openProjectorWindow creates the frameless, always-on-top window that hosts
+// the receiver page at url and wires up the shared "window closed"
+// notification. Shared by ShowScreen (legacy monitor-only flow) and
+// StartOutput (per-output flow) — they only differ in window name, URL and
+// transparency.
+func (g *DbHandler) openProjectorWindow(x, y, sizeX, sizeY float32, name, url string, transparent bool) {
 	app := application.Get()
 
-	url := "http://localhost:9093"
 	opts := application.WebviewWindowOptions{
 		Name:        name,
 		Title:       "VerseBearer - screen",
@@ -627,7 +636,6 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transpar
 		opts.BackgroundType = application.BackgroundTypeTransparent
 		opts.BackgroundColour = application.NewRGBA(0, 0, 0, 0)
 		opts.IgnoreMouseEvents = true
-		url += "?transparent=1"
 	}
 	opts.URL = url
 
@@ -638,6 +646,14 @@ func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transpar
 	})
 }
 
+func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transparent bool) {
+	url := "http://localhost:9093"
+	if transparent {
+		url += "?transparent=1"
+	}
+	g.openProjectorWindow(x, y, sizeX, sizeY, name, url, transparent)
+}
+
 func (g *DbHandler) CloseScreen(name string) {
 	app := application.Get()
 
@@ -646,6 +662,36 @@ func (g *DbHandler) CloseScreen(name string) {
 		return
 	}
 	s.Close()
+}
+
+// outputWindowName is the Wails window name for a persisted Output's
+// projector window, e.g. "out-3".
+func outputWindowName(id uint) string {
+	return "out-" + strconv.FormatUint(uint64(id), 10)
+}
+
+// StartOutput opens (or reopens) the projector window for a persisted Output
+// at the given bounds, loading the receiver with ?out=<id> so it filters
+// style/backdrop events down to just this output (see sse.go/App.svelte).
+func (g *DbHandler) StartOutput(idF, x, y, w, h float32) {
+	id := uint(idF)
+	var o models.Output
+	if err := inits.DB.First(&o, id).Error; err != nil {
+		log.Println("StartOutput: output not found", err)
+		return
+	}
+	transparentFlag := "0"
+	if o.Transparent {
+		transparentFlag = "1"
+	}
+	idStr := strconv.FormatUint(uint64(id), 10)
+	url := "http://localhost:9093?out=" + idStr + "&transparent=" + transparentFlag
+	g.openProjectorWindow(x, y, w, h, outputWindowName(id), url, o.Transparent)
+}
+
+// StopOutput closes the projector window for a persisted Output, if open.
+func (g *DbHandler) StopOutput(idF float32) {
+	g.CloseScreen(outputWindowName(uint(idF)))
 }
 
 // --- Visual / style handlers ---
@@ -736,12 +782,44 @@ func loadActiveTheme() (models.Theme, error) {
 	return t, nil
 }
 
+// loadDefaultTheme returns the theme with IsDefault=true, falling back to the
+// first theme (by id) if none is marked default (should not normally happen —
+// the default theme cannot be deleted, see DeleteTheme).
+func loadDefaultTheme() (models.Theme, error) {
+	var t models.Theme
+	if err := inits.DB.Where("is_default = ?", true).First(&t).Error; err == nil {
+		return t, nil
+	}
+	if err := inits.DB.Order("id ASC").First(&t).Error; err != nil {
+		return models.Theme{}, err
+	}
+	return t, nil
+}
+
+// resolveOutputTheme returns the theme that renders Output o: its own
+// ThemeId if set and still valid, otherwise the default theme. The Output
+// row is the source of truth for this resolution, resolved fresh from the DB
+// each time — operator edits (CRUD on outputs/themes) are rare, not a hot
+// path, so no in-memory registry is kept in sync.
+func resolveOutputTheme(o models.Output) models.Theme {
+	if o.ThemeId != nil {
+		var t models.Theme
+		if err := inits.DB.First(&t, *o.ThemeId).Error; err == nil {
+			return t
+		}
+	}
+	t, _ := loadDefaultTheme()
+	return t
+}
+
 // broadcastTheme pushes both verse and couplet styles of t to the receiver
-// using the existing style_update mechanism (receiver is unchanged).
+// using the existing style_update mechanism (receiver is unchanged). ThemeId
+// lets watchChannels scope the change to the outputs currently resolving to
+// t (see outputIdsForTheme in sse.go).
 func (g *DbHandler) broadcastTheme(t models.Theme) {
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(styleFromTheme(t, "verse"))}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(styleFromTheme(t, "couplet"))}
-	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(backdropFromTheme(t))}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(styleFromTheme(t, "verse")), ThemeId: t.ID}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(styleFromTheme(t, "couplet")), ThemeId: t.ID}
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(backdropFromTheme(t)), ThemeId: t.ID}
 }
 
 func (g *DbHandler) GetVisualSettings() VisualSettings {
@@ -789,7 +867,7 @@ func (g *DbHandler) UpdateBackdrop(input BackdropInput) Backdrop {
 		}
 	}
 	b := backdropFromTheme(t)
-	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b)}
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b), ThemeId: t.ID}
 	return b
 }
 
@@ -808,7 +886,7 @@ func (g *DbHandler) ResetBackdrop() Backdrop {
 		log.Println("ResetBackdrop: error saving", err)
 	}
 	b := Backdrop{BgType: "none"}
-	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b)}
+	g.styleB <- &StyleEvent{Type: "backdrop_update", Style: backdropToMap(b), ThemeId: t.ID}
 	return b
 }
 
@@ -869,7 +947,7 @@ func (g *DbHandler) UpdateVerseStyle(input StyleInput) VisualStyle {
 		}
 	}
 	style := styleFromTheme(t, "verse")
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(style)}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(style), ThemeId: t.ID}
 	return style
 }
 
@@ -930,7 +1008,7 @@ func (g *DbHandler) UpdateCoupletStyle(input StyleInput) VisualStyle {
 		}
 	}
 	style := styleFromTheme(t, "couplet")
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(style)}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(style), ThemeId: t.ID}
 	return style
 }
 
@@ -956,7 +1034,7 @@ func (g *DbHandler) ResetVerseStyle() VisualStyle {
 	}).Error; err != nil {
 		log.Println("ResetVerseStyle: error saving", err)
 	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(d)}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "verse", Style: styleToMap(d), ThemeId: t.ID}
 	return d
 }
 
@@ -982,7 +1060,7 @@ func (g *DbHandler) ResetCoupletStyle() VisualStyle {
 	}).Error; err != nil {
 		log.Println("ResetCoupletStyle: error saving", err)
 	}
-	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(d)}
+	g.styleB <- &StyleEvent{Type: "style_update", Target: "couplet", Style: styleToMap(d), ThemeId: t.ID}
 	return d
 }
 
@@ -1088,15 +1166,35 @@ func (g *DbHandler) DeleteTheme(idF float32) []models.Theme {
 		return g.ListThemes()
 	}
 	wasActive := g.GetActiveThemeId() == id
+
+	// Outputs pointing at the theme being deleted fall back to the default
+	// theme once its FK is nulled below — remember them so their (now
+	// resolved) style can be re-broadcast afterwards.
+	var affectedOutputs []models.Output
+	inits.DB.Where("theme_id = ?", id).Find(&affectedOutputs)
+
 	if err := inits.DB.Delete(&models.Theme{}, id).Error; err != nil {
 		log.Println("DeleteTheme: error deleting", err)
 		return g.ListThemes()
 	}
+	if err := inits.DB.Model(&models.Output{}).Where("theme_id = ?", id).Update("theme_id", nil).Error; err != nil {
+		log.Println("DeleteTheme: error clearing output theme refs", err)
+	}
+
 	if wasActive {
 		var def models.Theme
 		if err := inits.DB.Where("is_default = ?", true).First(&def).Error; err == nil {
 			g.applyTheme(def)
 		}
+	}
+	if len(affectedOutputs) > 0 {
+		// They all resolved to the same theme before deletion, so they all
+		// fall back the same way — resolving once is enough. watchChannels
+		// recomputes outputIds for every output currently on that theme, so
+		// this stays correct (and idempotent) for outputs unaffected by the
+		// deletion too.
+		fallback := resolveOutputTheme(affectedOutputs[0])
+		g.broadcastTheme(fallback)
 	}
 	return g.ListThemes()
 }
@@ -1212,4 +1310,80 @@ func (g *DbHandler) getImageDataInternal(id uint) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return im.Data, im.MimeType, nil
+}
+
+// --- Output CRUD ---
+
+func (g *DbHandler) ListOutputs() []models.Output {
+	var outputs []models.Output
+	if err := inits.DB.Order("id ASC").Find(&outputs).Error; err != nil {
+		log.Println("ListOutputs: error", err)
+		return nil
+	}
+	return outputs
+}
+
+// CreateOutput adds a new output pointing at the default theme.
+func (g *DbHandler) CreateOutput(name string) *models.Output {
+	var themeId *uint
+	if def, err := loadDefaultTheme(); err == nil {
+		id := def.ID
+		themeId = &id
+	} else {
+		log.Println("CreateOutput: error loading default theme", err)
+	}
+	o := models.Output{Name: name, ThemeId: themeId, Transparent: false, ScreenID: ""}
+	if err := inits.DB.Create(&o).Error; err != nil {
+		log.Println("CreateOutput: error creating output", err)
+		return nil
+	}
+	return &o
+}
+
+func (g *DbHandler) RenameOutput(idF float32, name string) []models.Output {
+	if err := inits.DB.Model(&models.Output{}).Where("id = ?", uint(idF)).Update("name", name).Error; err != nil {
+		log.Println("RenameOutput: error", err)
+	}
+	return g.ListOutputs()
+}
+
+func (g *DbHandler) DeleteOutput(idF float32) []models.Output {
+	if err := inits.DB.Delete(&models.Output{}, uint(idF)).Error; err != nil {
+		log.Println("DeleteOutput: error deleting", err)
+	}
+	return g.ListOutputs()
+}
+
+func (g *DbHandler) SetOutputScreen(idF float32, screenId string) []models.Output {
+	if err := inits.DB.Model(&models.Output{}).Where("id = ?", uint(idF)).Update("screen_id", screenId).Error; err != nil {
+		log.Println("SetOutputScreen: error", err)
+	}
+	return g.ListOutputs()
+}
+
+func (g *DbHandler) SetOutputTransparent(idF float32, v bool) []models.Output {
+	if err := inits.DB.Model(&models.Output{}).Where("id = ?", uint(idF)).Update("transparent", v).Error; err != nil {
+		log.Println("SetOutputTransparent: error", err)
+	}
+	return g.ListOutputs()
+}
+
+// SetOutputTheme repoints an output at a different theme and immediately
+// broadcasts that theme's full style/backdrop so the output's live
+// projection (if open) updates right away — a full re-render, not a patch,
+// since the output could be coming from an entirely different theme.
+func (g *DbHandler) SetOutputTheme(idF float32, themeIdF float32) []models.Output {
+	id := uint(idF)
+	themeId := uint(themeIdF)
+	if err := inits.DB.Model(&models.Output{}).Where("id = ?", id).Update("theme_id", themeId).Error; err != nil {
+		log.Println("SetOutputTheme: error", err)
+		return g.ListOutputs()
+	}
+	var t models.Theme
+	if err := inits.DB.First(&t, themeId).Error; err == nil {
+		g.broadcastTheme(t)
+	} else {
+		log.Println("SetOutputTheme: new theme not found", err)
+	}
+	return g.ListOutputs()
 }

@@ -27,6 +27,7 @@ func init() {
 		&models.GlobalState{},
 		&models.Font{},
 		&models.Image{},
+		&models.Output{},
 	)
 
 	// Ensure GlobalState row 1 exists
@@ -55,6 +56,24 @@ func init() {
 			"active_theme_id": seed.ID,
 			"version":         "4",
 		})
+		// Keep the in-memory GlobalState in sync so the version<"5" seed below
+		// (which runs in the same init on a fresh DB) sees the right theme.
+		gs.ActiveThemeId = &seed.ID
+		gs.Version = "4"
+	}
+
+	// version < "5": output styles/backdrops moved from the single active theme
+	// to per-Output ThemeId (see models.Output). Seed one default Output
+	// ("Экран") pointing at the current active theme so the existing "нажал
+	// Транслировать" behavior is preserved unchanged after upgrade.
+	if gs.Version < "5" {
+		db.Create(&models.Output{
+			Name:        "Экран",
+			ThemeId:     gs.ActiveThemeId,
+			Transparent: false,
+			ScreenID:    "",
+		})
+		db.Model(&gs).Update("version", "5")
 	}
 
 	DB = db

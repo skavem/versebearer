@@ -19,6 +19,62 @@ import (
 	"gorm.io/gorm"
 )
 
+// outputStylePayload is the per-output slice of the sync event's "styles"
+// map: {"<outputID>": {verse, couplet, backdrop}}.
+type outputStylePayload struct {
+	Verse    VisualStyle    `json:"verse"`
+	Couplet  VisualStyle    `json:"couplet"`
+	Backdrop map[string]any `json:"backdrop"`
+}
+
+// buildOutputStyles resolves every persisted Output's theme from the DB
+// (source of truth — not an in-memory cache, since output/theme CRUD is a
+// rare operator action, not a hot path) and renders its verse/couplet/
+// backdrop styles. It also returns the first output's styles for the sync
+// event's legacy top-level verseStyle/coupletStyle/backdrop fields, so a
+// receiver connecting without ?out= keeps working unchanged.
+func buildOutputStyles() (map[string]outputStylePayload, VisualStyle, VisualStyle, map[string]any) {
+	var outputs []models.Output
+	inits.DB.Order("id ASC").Find(&outputs)
+
+	styles := map[string]outputStylePayload{}
+	defVerse := DefaultVerseStyle
+	defCouplet := DefaultCoupletStyle
+	defBackdrop := backdropToMap(Backdrop{BgType: "none"})
+
+	for i, o := range outputs {
+		t := resolveOutputTheme(o)
+		p := outputStylePayload{
+			Verse:    styleFromTheme(t, "verse"),
+			Couplet:  styleFromTheme(t, "couplet"),
+			Backdrop: backdropToMap(backdropFromTheme(t)),
+		}
+		styles[strconv.FormatUint(uint64(o.ID), 10)] = p
+		if i == 0 {
+			defVerse = p.Verse
+			defCouplet = p.Couplet
+			defBackdrop = p.Backdrop
+		}
+	}
+
+	return styles, defVerse, defCouplet, defBackdrop
+}
+
+// outputIdsForTheme returns the ids of every persisted Output whose resolved
+// theme (see resolveOutputTheme) is themeId, scoping a style/backdrop change
+// on that theme to just the outputs it affects.
+func outputIdsForTheme(themeId uint) []uint {
+	var outputs []models.Output
+	inits.DB.Find(&outputs)
+	ids := []uint{}
+	for _, o := range outputs {
+		if resolveOutputTheme(o).ID == themeId {
+			ids = append(ids, o.ID)
+		}
+	}
+	return ids
+}
+
 func watchChannels(
 	bibleChannel chan *ShownVerse,
 	songChannel chan *ShownCouplet,
@@ -30,34 +86,23 @@ func watchChannels(
 	var lastVerse *ShownVerse = nil
 	var lastCouplet *ShownCouplet = nil
 	var qr bool = false
-	var lastVerseStyle VisualStyle
-	var lastCoupletStyle VisualStyle
 	var lastFonts []models.Font
-	lastBackdrop := backdropToMap(Backdrop{BgType: "none"})
-
-	// Initialize style + backdrop cache from the active theme
-	if t, err := loadActiveTheme(); err == nil {
-		lastVerseStyle = styleFromTheme(t, "verse")
-		lastCoupletStyle = styleFromTheme(t, "couplet")
-		lastBackdrop = backdropToMap(backdropFromTheme(t))
-	} else {
-		lastVerseStyle = DefaultVerseStyle
-		lastCoupletStyle = DefaultCoupletStyle
-	}
 	inits.DB.Find(&lastFonts)
 
 	for {
 		event := map[string]any{}
 		select {
 		case <-userChannel:
+			styles, defVerse, defCouplet, defBackdrop := buildOutputStyles()
 			event["type"] = "sync"
 			event["verse"] = lastVerse
 			event["couplet"] = lastCouplet
 			event["qr"] = qr
-			event["verseStyle"] = lastVerseStyle
-			event["coupletStyle"] = lastCoupletStyle
-			event["backdrop"] = lastBackdrop
 			event["fonts"] = lastFonts
+			event["styles"] = styles
+			event["verseStyle"] = defVerse
+			event["coupletStyle"] = defCouplet
+			event["backdrop"] = defBackdrop
 		case verse := <-bibleChannel:
 			event["type"] = "hide_verse"
 			lastVerse = nil
@@ -88,14 +133,14 @@ func watchChannels(
 			if styleEvt.Type == "style_update" {
 				event["target"] = styleEvt.Target
 				event["style"] = styleEvt.Style
-				if styleEvt.Target == "verse" {
-					mergeStyle(&lastVerseStyle, styleEvt.Style)
-				} else if styleEvt.Target == "couplet" {
-					mergeStyle(&lastCoupletStyle, styleEvt.Style)
+				if styleEvt.ThemeId != 0 {
+					event["outputIds"] = outputIdsForTheme(styleEvt.ThemeId)
 				}
 			} else if styleEvt.Type == "backdrop_update" {
 				event["style"] = styleEvt.Style
-				lastBackdrop = styleEvt.Style
+				if styleEvt.ThemeId != 0 {
+					event["outputIds"] = outputIdsForTheme(styleEvt.ThemeId)
+				}
 			} else if styleEvt.Type == "fonts_changed" {
 				event["fonts"] = styleEvt.Fonts
 				lastFonts = styleEvt.Fonts
@@ -107,47 +152,6 @@ func watchChannels(
 			continue
 		}
 		server.Publish("main", &sse.Event{Data: data})
-	}
-}
-
-func mergeStyle(s *VisualStyle, m map[string]any) {
-	if v, ok := m["bgColor"].(string); ok {
-		s.BgColor = v
-	}
-	if v, ok := m["bgOpacity"].(float64); ok {
-		s.BgOpacity = v
-	}
-	if v, ok := m["textColor"].(string); ok {
-		s.TextColor = v
-	}
-	if v, ok := m["fontId"]; ok {
-		switch fv := v.(type) {
-		case *uint:
-			s.FontId = fv
-		case nil:
-			s.FontId = nil
-		}
-	}
-	if v, ok := m["borderColor"].(string); ok {
-		s.BorderColor = v
-	}
-	if v, ok := m["borderWidth"].(int); ok {
-		s.BorderWidth = v
-	}
-	if v, ok := m["borderRadius"].(int); ok {
-		s.BorderRadius = v
-	}
-	if v, ok := m["borderStyle"].(string); ok {
-		s.BorderStyle = v
-	}
-	if v, ok := m["padding"].(int); ok {
-		s.Padding = v
-	}
-	if v, ok := m["margin"].(int); ok {
-		s.Margin = v
-	}
-	if v, ok := m["textShadow"].(string); ok {
-		s.TextShadow = v
 	}
 }
 
@@ -169,9 +173,28 @@ func createSSE(
 
 	server := sse.New()
 	server.AutoReplay = false
-	server.CreateStream("main")
 
 	userChannel := make(chan bool)
+
+	// OnSubscribe must be assigned before CreateStream — CreateStream snapshots
+	// it into the stream at creation time, so setting it afterward is a no-op.
+	// It fires from stream.addSubscriber *after* the subscriber is already
+	// registered on the stream (registration happens synchronously; the
+	// callback itself runs in its own goroutine), so triggering the sync build
+	// here is guaranteed to reach this connection. That fixes a latent race in
+	// the old approach: userChannel<-true used to be sent before
+	// server.ServeHTTP(w, r) even ran, so a freshly opened window could miss
+	// its initial sync if it wasn't registered yet by the time it was built.
+	server.OnSubscribe = func(streamID string, sub *sse.Subscriber) {
+		// out is parsed here so per-output filtering could hook in later; today
+		// the sync payload already carries every output's style (see
+		// buildOutputStyles), so all subscribers receive identical content and
+		// filter client-side by their own ?out=.
+		_ = sub.URL.Query().Get("out")
+		userChannel <- true
+	}
+	server.CreateStream("main")
+
 	mux := http.NewServeMux()
 
 	dist, err := fs.Sub(recAssets, "reciever/dist")
@@ -230,7 +253,6 @@ func createSSE(
 
 	mux.Handle("/", fsServer)
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
-		userChannel <- true
 		go func() {
 			<-r.Context().Done()
 			log.Println("Client disconnected")

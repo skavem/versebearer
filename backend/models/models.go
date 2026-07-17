@@ -147,3 +147,17 @@ type Image struct {
 	Data      []byte `json:"-"`
 	SizeBytes int    `json:"sizeBytes"`
 }
+
+// Output is a named projection target ("Зал", "Стрим"): content (verse/couplet
+// text, qr, fonts) is broadcast identically to every output, but each output
+// resolves its own style/backdrop via ThemeId (see resolveOutputTheme in
+// dbHandler.go). The Output row is the source of truth for that resolution —
+// not any in-memory cache — since CRUD on outputs is an infrequent operator
+// action, not a hot path.
+type Output struct {
+	gorm.Model
+	Name        string `json:"name"`
+	ThemeId     *uint  `json:"themeId"`     // theme rendering this output; nil => default theme
+	ScreenID    string `json:"screenId"`    // Wails Screen.ID of the target monitor; "" = unassigned
+	Transparent bool   `json:"transparent"` // transparent window for OBS capture
+}
