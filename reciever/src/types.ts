@@ -34,6 +34,16 @@ export type IBackdrop = {
   bgImageId: number | null;
 }
 
+// Per-output resolved style, keyed by output id (string) in sync's "styles"
+// map — see buildOutputStyles in sse.go.
+export type IOutputStyle = {
+  verse: IVisualStyle;
+  couplet: IVisualStyle;
+  backdrop: IBackdrop;
+}
+
+export type IOutputStylesMap = Record<string, IOutputStyle>;
+
 export type IFont = {
   ID: number;
   name: string;

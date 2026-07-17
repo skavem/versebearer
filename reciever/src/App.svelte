@@ -41,6 +41,11 @@
     document.body.style.background = "transparent";
   }
 
+  // Which persisted Output this window renders (Output.ID as a string), or
+  // null for the legacy/unlabeled case (no ?out= — applies every style
+  // update unconditionally, same as before outputs existed).
+  const myOut = new URLSearchParams(location.search).get("out");
+
   let verse = $state<IShownVerse | null>(null);
   let couplet = $state<IShownCouplet | null>(null);
   let qr = $state<boolean>(false);
@@ -75,7 +80,7 @@
   }
 
   $effect(() => {
-    const sse = new EventSource("/sse?stream=main");
+    const sse = new EventSource("/sse?stream=main&out=" + encodeURIComponent(myOut ?? ""));
     sse.onmessage = (event) => {
       const data = JSON.parse(event.data);
       console.log(data);
@@ -98,28 +103,44 @@
         case "show_qr":
           qr = true;
           break;
-        case "sync":
+        case "sync": {
           verse = data.verse;
           couplet = data.couplet;
           qr = data.qr;
-          if (data.verseStyle) verseStyle = data.verseStyle;
-          if (data.coupletStyle) coupletStyle = data.coupletStyle;
-          if (data.backdrop) backdrop = data.backdrop;
+          // Prefer this output's own resolved style; fall back to the
+          // top-level (default output) fields for backward compatibility
+          // when no ?out= is set or this output isn't in the map.
+          const outStyle = myOut ? data.styles?.[myOut] : undefined;
+          if (outStyle) {
+            verseStyle = outStyle.verse;
+            coupletStyle = outStyle.couplet;
+            backdrop = outStyle.backdrop;
+          } else {
+            if (data.verseStyle) verseStyle = data.verseStyle;
+            if (data.coupletStyle) coupletStyle = data.coupletStyle;
+            if (data.backdrop) backdrop = data.backdrop;
+          }
           if (data.fonts) {
             fonts = data.fonts;
             injectFonts(data.fonts);
           }
           break;
-        case "style_update":
+        }
+        case "style_update": {
+          const applies = !myOut || (data.outputIds?.includes(Number(myOut)) ?? false);
+          if (!applies) break;
           if (data.target === "verse" && data.style) {
             verseStyle = mergeStyle(verseStyle, data.style);
           } else if (data.target === "couplet" && data.style) {
             coupletStyle = mergeStyle(coupletStyle, data.style);
           }
           break;
-        case "backdrop_update":
-          if (data.style) backdrop = data.style;
+        }
+        case "backdrop_update": {
+          const applies = !myOut || (data.outputIds?.includes(Number(myOut)) ?? false);
+          if (applies && data.style) backdrop = data.style;
           break;
+        }
         case "fonts_changed":
           if (data.fonts) {
             fonts = data.fonts;
