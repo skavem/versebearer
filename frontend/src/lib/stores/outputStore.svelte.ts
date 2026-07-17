@@ -4,9 +4,13 @@ import {
   GetCurrentScreenID,
   ListOutputs,
   RenameOutput,
+  SetOutputAlwaysOnTop,
+  SetOutputFrameless,
+  SetOutputMode,
   SetOutputScreen,
   SetOutputTheme,
   SetOutputTransparent,
+  SetOutputWindowSize,
   StartOutput,
   StopOutput,
 } from "$lib/bindings/changeme/dbhandler";
@@ -45,10 +49,25 @@ const createOutputStore = () => {
     return monitors.find((m) => m.ID === o.screenId);
   }
 
-  function applyStart(o: Output) {
+  // Bounds of the reference monitor to hand StartOutput. "display" mode needs
+  // its assigned monitor to fill (missing => can't start at all). "window"
+  // mode only needs *some* monitor to center on the first time it's ever
+  // opened — fall back to the primary monitor, then to a zero rect so the
+  // backend still opens the window (just without a sensible initial center).
+  function referenceBounds(o: Output) {
     const m = monitorFor(o);
-    if (!m) return;
-    StartOutput(o.ID, m.Bounds.X, m.Bounds.Y, m.Bounds.Width, m.Bounds.Height);
+    if (m) return m.Bounds;
+    if (o.mode === "window") {
+      const primary = monitors.find((mon) => mon.IsPrimary);
+      if (primary) return primary.Bounds;
+    }
+    return { X: 0, Y: 0, Width: 0, Height: 0 };
+  }
+
+  function applyStart(o: Output) {
+    if (o.mode !== "window" && !monitorFor(o)) return;
+    const b = referenceBounds(o);
+    StartOutput(o.ID, b.X, b.Y, b.Width, b.Height);
     activeOutputIds = [...activeOutputIds, o.ID];
   }
 
@@ -126,6 +145,37 @@ const createOutputStore = () => {
 
     async setTheme(id: number, themeId: number) {
       outputs = (await SetOutputTheme(id, themeId)) ?? outputs;
+    },
+
+    // Display vs window differ in window-creation options that can't all be
+    // changed live (initial size/position, click-through) — reopen the
+    // projector window on the new mode if it was already projecting.
+    async setMode(id: number, mode: "display" | "window") {
+      const wasActive = activeOutputIds.includes(id);
+      if (wasActive) {
+        const o = outputs.find((x) => x.ID === id);
+        if (o) applyStop(o);
+      }
+      outputs = (await SetOutputMode(id, mode)) ?? outputs;
+      if (wasActive) {
+        const updated = outputs.find((x) => x.ID === id);
+        if (updated) applyStart(updated);
+      }
+    },
+
+    // Frame/always-on-top/size apply live to an open window-mode projector —
+    // no stop+start needed (see SetOutputFrameless/SetOutputAlwaysOnTop/
+    // SetOutputWindowSize in dbHandler.go).
+    async setWindowSize(id: number, width: number, height: number) {
+      outputs = (await SetOutputWindowSize(id, width, height)) ?? outputs;
+    },
+
+    async setFrameless(id: number, v: boolean) {
+      outputs = (await SetOutputFrameless(id, v)) ?? outputs;
+    },
+
+    async setAlwaysOnTop(id: number, v: boolean) {
+      outputs = (await SetOutputAlwaysOnTop(id, v)) ?? outputs;
     },
 
     // Same UX guard as the old monitor-centric store: warn before covering

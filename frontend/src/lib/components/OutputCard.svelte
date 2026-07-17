@@ -4,6 +4,7 @@
   import type { Output } from "$lib/bindings/changeme/backend/models";
   import MuiIcon from "./MuiIcon.svelte";
   import PopoverSelect from "./PopoverSelect.svelte";
+  import NumberStepper from "./NumberStepper.svelte";
 
   const { output, index }: { output: Output; index: number } = $props();
 
@@ -12,6 +13,14 @@
   const monitorMissing = $derived(output.screenId !== "" && !monitor);
   const isCurrent = $derived(!!monitor && output.screenId === outputStore.currentScreenID);
   const scalePct = $derived(monitor ? Math.round(monitor.ScaleFactor * 100) : 0);
+
+  // "" (pre-existing rows from before Mode existed) behaves as "display" —
+  // mirrors the Go-side fallback in models.Output.
+  const mode = $derived(output.mode || "display");
+  const isWindowMode = $derived(mode === "window");
+  // Window mode doesn't need a monitor — StartOutput centers on the primary
+  // monitor the first time it opens (see outputStore.referenceBounds).
+  const canStart = $derived(isWindowMode || !!monitor);
 
   const monitorOptions = $derived([
     { value: "", label: "Не выбран" },
@@ -146,14 +155,38 @@
       </div>
     </div>
 
+    <div class="join w-full">
+      <button
+        type="button"
+        class="btn btn-xs join-item flex-1 {mode === 'display' ? 'btn-neutral' : 'btn-outline'}"
+        onclick={() => outputStore.setMode(output.ID, "display")}
+      >
+        <MuiIcon name="desktop_windows" style="font-size: 0.9rem" />
+        Дисплей
+      </button>
+      <button
+        type="button"
+        class="btn btn-xs join-item flex-1 {mode === 'window' ? 'btn-neutral' : 'btn-outline'}"
+        onclick={() => outputStore.setMode(output.ID, "window")}
+      >
+        <MuiIcon name="web_asset" style="font-size: 0.9rem" />
+        Окно
+      </button>
+    </div>
+
     <div class="flex flex-col gap-2">
-      <PopoverSelect
-        icon="monitor"
-        value={output.screenId}
-        options={monitorOptions}
-        ariaLabel="Монитор выхода"
-        onChange={(v) => outputStore.setScreen(output.ID, v)}
-      />
+      <div class="flex flex-col gap-1">
+        <span class="pl-1 text-[10px] uppercase tracking-wide text-base-content/50">
+          Открыть на
+        </span>
+        <PopoverSelect
+          icon="monitor"
+          value={output.screenId}
+          options={monitorOptions}
+          ariaLabel="Монитор выхода"
+          onChange={(v) => outputStore.setScreen(output.ID, v)}
+        />
+      </div>
       <PopoverSelect
         icon="palette"
         value={themeValue}
@@ -166,14 +199,16 @@
     {#if monitorState === "missing"}
       <div class="flex items-center gap-1.5 rounded-md bg-warning/10 p-2 text-xs text-warning">
         <MuiIcon name="warning" style="font-size: 1rem" />
-        Монитор не найден — выберите другой
+        {isWindowMode
+          ? "Монитор для центрирования не найден — откроется на основном"
+          : "Монитор не найден — выберите другой"}
       </div>
-    {:else if monitorState === "unassigned"}
+    {:else if monitorState === "unassigned" && !isWindowMode}
       <div class="flex items-center gap-1.5 rounded-md bg-base-200/60 p-2 text-xs text-base-content/50">
         <MuiIcon name="info" style="font-size: 1rem" />
         Монитор не выбран — трансляция недоступна
       </div>
-    {:else}
+    {:else if monitorState === "ready"}
       <div class="grid grid-cols-2 gap-2 text-sm">
         <div class="flex flex-col rounded-md bg-base-200/60 p-2">
           <span class="text-[10px] uppercase tracking-wide text-base-content/50">
@@ -190,6 +225,60 @@
           <span class="font-mono font-semibold">{scalePct}%</span>
         </div>
       </div>
+    {/if}
+
+    {#if isWindowMode}
+      <div class="flex flex-wrap items-center gap-2">
+        <NumberStepper
+          value={output.winWidth || 1280}
+          min={200}
+          max={7680}
+          step={10}
+          label="Ш"
+          onChange={(n) => outputStore.setWindowSize(output.ID, n, output.winHeight || 720)}
+        />
+        <span class="text-xs text-base-content/40">×</span>
+        <NumberStepper
+          value={output.winHeight || 720}
+          min={200}
+          max={4320}
+          step={10}
+          label="В"
+          onChange={(n) => outputStore.setWindowSize(output.ID, output.winWidth || 1280, n)}
+        />
+      </div>
+
+      <label
+        class="flex cursor-pointer items-center justify-between gap-2 rounded-md bg-base-200/60 p-2"
+        title="Показывать системную рамку и заголовок окна"
+      >
+        <span class="flex items-center gap-1 text-sm">
+          <MuiIcon name="border_all" style="font-size: 1.1rem" />
+          Рамка
+        </span>
+        <input
+          type="checkbox"
+          class="toggle toggle-sm toggle-neutral"
+          checked={!output.frameless}
+          onchange={(e) => outputStore.setFrameless(output.ID, !e.currentTarget.checked)}
+        />
+      </label>
+
+      <label
+        class="flex cursor-pointer items-center justify-between gap-2 rounded-md bg-base-200/60 p-2"
+        title="Держать окно поверх остальных приложений"
+      >
+        <span class="flex items-center gap-1 text-sm">
+          <MuiIcon name="push_pin" style="font-size: 1.1rem" />
+          Поверх всех
+        </span>
+        <input
+          type="checkbox"
+          class="toggle toggle-sm toggle-neutral"
+          checked={output.alwaysOnTop}
+          onchange={(e) => outputStore.setAlwaysOnTop(output.ID, e.currentTarget.checked)}
+        />
+      </label>
     {/if}
 
     <label
@@ -216,8 +305,8 @@
 
     <button
       onclick={() => outputStore.requestToggle(output)}
-      disabled={!projecting && !monitor}
-      title={!projecting && !monitor ? "Сначала выберите монитор" : undefined}
+      disabled={!projecting && !canStart}
+      title={!projecting && !canStart ? "Сначала выберите монитор" : undefined}
       class={[
         "btn btn-sm w-full",
         projecting ? "btn-outline btn-error" : "btn-neutral",
