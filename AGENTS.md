@@ -16,7 +16,7 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 | `Bible.json` | Seed Synodal translation (books/chapters/verses) consumed by `backend/filler` |
 | `songs.json` | Seed song dump consumed by `backend/filler` (untracked, in `.gitignore`) |
 | `test.db` | Local SQLite DB (created by `backend/inits` at startup, ignored) |
-| `.env` | Optional, dev-only. `DEV=true` serves the receiver from disk instead of the embedded FS. Absent in production builds — `godotenv.Load()` is best-effort, a missing file is not fatal |
+| `.env` | Optional, dev-only. Holds `DEV=false` by default. `DEV=true` makes SSE serve the receiver from `./reciever/dist` on disk instead of the embedded FS. The `dev` task (`Taskfile.yml`) sets `DEV=true` in-env, and `godotenv.Load()` is non-overriding so that wins over `.env` — i.e. `task dev` serves the receiver from disk (live with the `common:dev:reciever` watcher), while a normal `task build`/packaged run never sets `DEV` and keeps the embedded copy. Absent in production builds — `godotenv.Load()` is best-effort, a missing file is not fatal |
 
 ## Subdirectories
 | Directory | Purpose |

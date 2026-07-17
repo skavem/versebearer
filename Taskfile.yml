@@ -34,6 +34,12 @@ tasks:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
     env:
       PRODUCTION: "false"
+      # Dev-only: serve the receiver from reciever/dist on disk so the
+      # common:dev:reciever watcher's rebuilds show up live (no Go recompile).
+      # Inherited by the app the dev pipeline launches. godotenv.Load() is
+      # non-overriding, so this beats DEV=false in .env. A normal `task build`
+      # never sets DEV, so packaged/built runs keep serving the embedded copy.
+      DEV: "true"
 
   test:
     summary: Runs Go unit tests (in-memory SQLite, no Wails/frontend deps)
