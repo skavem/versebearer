@@ -55,7 +55,21 @@
       );
       if (i < 0) return;
       scrolled = true;
-      mainDiv.scrollTo({ top: i * 44 });
+
+      // Only scroll when the active row is off-screen, and then just enough to
+      // reveal it at the nearest edge (like scrollIntoView block:"nearest").
+      // Scrolling an already-visible row to the top made the list jump on every
+      // click / arrow press — the "shake" the operator saw.
+      const rowTop = i * 44;
+      const rowBottom = rowTop + 44;
+      const viewTop = mainDiv.scrollTop;
+      const viewBottom = viewTop + mainDiv.clientHeight;
+
+      if (rowTop < viewTop) {
+        mainDiv.scrollTo({ top: rowTop });
+      } else if (rowBottom > viewBottom) {
+        mainDiv.scrollTo({ top: rowBottom - mainDiv.clientHeight });
+      }
     }
   });
 
