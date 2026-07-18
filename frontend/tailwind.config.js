@@ -23,15 +23,25 @@ export default {
     themes: [
       {
         mytheme: {
-          primary: "#0ea5e9",
-          secondary: "#10b981",
-          accent: "#84cc16",
-          neutral: "#0c4a6e",
+          // Палитра «Петроль + Янтарь» (светлая): петроль-navy как база,
+          // тёплый янтарь как индикатор «в эфире / текущее». Серьёзно, без мультяшности.
+          primary: "#22668A", // стальной синий — основные действия
+          "primary-content": "#ffffff",
+          secondary: "#C88A3D", // янтарь — «в эфире / текущее»
+          "secondary-content": "#1a2a33",
+          accent: "#1B3A4B", // резерв, в одной семье с базой
+          "accent-content": "#ffffff",
+          neutral: "#1B3A4B", // петроль-navy — тёмные поверхности и текст
+          "neutral-content": "#eaf1f5",
           "base-100": "#ffffff",
-          info: "#6366f1",
-          success: "#22c55e",
-          warning: "#eab308",
-          error: "#ef4444",
+          "base-200": "#f1f5f8",
+          "base-300": "#dce5eb",
+          "base-content": "#1B3A4B",
+          info: "#2E7DA6",
+          success: "#3E7C76",
+          warning: "#B5822E",
+          error: "#C0453B",
+          "error-content": "#ffffff",
           "--rounded-box": "0.5rem", // border radius rounded-box utility class, used in card and other large boxes
           "--rounded-btn": "0.25rem", // border radius rounded-btn utility class, used in buttons and similar element
           "--rounded-badge": "0.25rem", // border radius rounded-badge utility class, used in badges and similar
@@ -45,18 +55,26 @@ export default {
       },
       {
         mydark: {
-          primary: "#0ea5e9",
-          secondary: "#10b981",
-          accent: "#84cc16",
-          neutral: "#0c4a6e",
-          "base-100": "#1d232a",
-          "base-200": "#191e24",
-          "base-300": "#15191e",
-          "base-content": "#c7ccd1",
-          info: "#6366f1",
-          success: "#22c55e",
-          warning: "#eab308",
-          error: "#ef4444",
+          // Палитра «Петроль + Янтарь» (тёмная). Элевация «вверх»: фон самый
+          // тёмный, поверхности и рамки светлее — мягкое расслоение вместо
+          // плоского MUI. Акценты приглушённо-люминесцентные, не кислотные.
+          primary: "#4B9FCF", // люминесцентный стальной синий
+          "primary-content": "#08151d",
+          secondary: "#E0A75B", // тёплый мягкий янтарь
+          "secondary-content": "#201603",
+          accent: "#4B9FCF",
+          "accent-content": "#08151d",
+          neutral: "#21323f", // глубокий петроль — тёмный навбар (белый текст)
+          "neutral-content": "#e6edf3",
+          "base-100": "#17232f", // фон (страница + карточки), не чёрный
+          "base-200": "#20303e", // внутренние плашки — светлее, «приподняты»
+          "base-300": "#33485b", // рамки/грани — видимый мягкий контур
+          "base-content": "#dbe5ee", // мягкий холодный не-белый
+          info: "#56A6D2",
+          success: "#5CAEA4",
+          warning: "#E0B45C",
+          error: "#E07064", // мягкий коралловый, не резкий
+          "error-content": "#1c0806",
           "--rounded-box": "0.5rem",
           "--rounded-btn": "0.25rem",
           "--rounded-badge": "0.25rem",

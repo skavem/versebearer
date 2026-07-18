@@ -25,7 +25,7 @@
         </div>
         <div class="stat px-4 py-2">
           <div class="stat-title text-[10px]">В эфире</div>
-          <div class="stat-value text-xl text-neutral">{projectingCount}</div>
+          <div class="stat-value text-xl text-secondary">{projectingCount}</div>
         </div>
       </div>
       <button class="btn btn-sm btn-neutral" onclick={() => outputStore.add()}>

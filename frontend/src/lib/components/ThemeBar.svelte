@@ -98,7 +98,7 @@
     <div class="modal-box">
       <div class="mb-4 flex items-center gap-3">
         <div
-          class="flex h-10 w-10 items-center justify-center rounded-full bg-neutral/10 text-neutral"
+          class="flex h-10 w-10 items-center justify-center rounded-full bg-neutral/10 text-base-content"
         >
           <MuiIcon name={mode === "create" ? "add" : "edit"} />
         </div>
