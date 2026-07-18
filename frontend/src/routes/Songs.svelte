@@ -109,7 +109,7 @@
   </div>
 
   <div class="flex w-2/3 flex-col gap-2 lg:w-4/5">
-    <div class="flex h-4/5 flex-col gap-2">
+    <div class="flex h-4/5 min-h-0 flex-col gap-2">
       <Select
         items={couplets.list}
         activeItem={couplets.active}
@@ -166,7 +166,7 @@
       </div>
     </div>
 
-    <div class="h-1/5 w-full">
+    <div class="h-1/5 min-h-0 w-full">
       <List
         items={favorites.list}
         activeItem={favorites.active}
