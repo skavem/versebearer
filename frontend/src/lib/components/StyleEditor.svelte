@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { VisualStyle } from "$lib/bindings/changeme/models";
   import type { Font } from "$lib/bindings/changeme/backend/models";
+  import { createDebouncer } from "$lib/debounce";
   import MuiIcon from "./MuiIcon.svelte";
   import NumberStepper from "./NumberStepper.svelte";
   import PopoverSelect from "./PopoverSelect.svelte";
@@ -23,17 +24,8 @@
     onDeleteFont: (id: number) => void;
   } = $props();
 
-  let timers: Record<string, ReturnType<typeof setTimeout>> = {};
-  function debounce(key: string, fn: () => void, ms = 150) {
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(fn, ms);
-  }
-
-  $effect(() => {
-    return () => {
-      Object.values(timers).forEach(clearTimeout);
-    };
-  });
+  const { debounce, cancelAll } = createDebouncer();
+  $effect(() => cancelAll);
 
   // Shadow decomposed
   let shadowColor = $state("#000000");
@@ -69,16 +61,15 @@
     return `rgba(${(i >> 16) & 0xff}, ${(i >> 8) & 0xff}, ${i & 0xff}, ${opacity})`;
   }
 
-  const previewFontFamily = $derived.by(() => {
-    if (style.fontId == null) return '"Century Gothic", sans-serif';
-    const f = fonts.find((x) => x.ID === style.fontId);
-    return f ? `"${f.name}", "Century Gothic", sans-serif` : '"Century Gothic", sans-serif';
-  });
-
-  const selectedFontName = $derived.by(() => {
-    if (style.fontId == null) return "По умолчанию";
-    return fonts.find((x) => x.ID === style.fontId)?.name ?? "По умолчанию";
-  });
+  const selectedFont = $derived(
+    style.fontId == null ? null : (fonts.find((x) => x.ID === style.fontId) ?? null),
+  );
+  const previewFontFamily = $derived(
+    selectedFont
+      ? `"${selectedFont.name}", "Century Gothic", sans-serif`
+      : '"Century Gothic", sans-serif',
+  );
+  const selectedFontName = $derived(selectedFont?.name ?? "По умолчанию");
 
   // --- Font picker popover ---
   let fontMenuOpen = $state(false);
@@ -110,6 +101,19 @@
     { value: "none", label: "нет" },
   ];
 </script>
+
+{#snippet swatch(color: string, onPick: (v: string) => void)}
+  <label class="swatch">
+    <span class="swatch-color" style:background-color={color}></span>
+    <span class="swatch-hex">{color.toUpperCase()}</span>
+    <input
+      type="color"
+      class="swatch-input"
+      value={color}
+      oninput={(e) => onPick((e.target as HTMLInputElement).value)}
+    />
+  </label>
+{/snippet}
 
 <div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-100 p-4 shadow-sm">
   <!-- Header -->
@@ -149,17 +153,7 @@
       Плашка (за текстом)
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <label class="swatch">
-        <span class="swatch-color" style:background-color={style.bgColor}></span>
-        <span class="swatch-hex">{style.bgColor.toUpperCase()}</span>
-        <input
-          type="color"
-          class="swatch-input"
-          value={style.bgColor}
-          oninput={(e) =>
-            debounce("bgColor", () => onUpdate({ bgColor: (e.target as HTMLInputElement).value }), 150)}
-        />
-      </label>
+      {@render swatch(style.bgColor, (v) => debounce("bgColor", () => onUpdate({ bgColor: v }), 150))}
       <div class="flex min-w-[9rem] flex-1 flex-col gap-1">
         <span class="text-xs text-base-content/60">Непрозрачность: {Math.round(style.bgOpacity * 100)}%</span>
         <input
@@ -183,16 +177,7 @@
       Текст
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <label class="swatch">
-        <span class="swatch-color" style:background-color={style.textColor}></span>
-        <span class="swatch-hex">{style.textColor.toUpperCase()}</span>
-        <input
-          type="color"
-          class="swatch-input"
-          value={style.textColor}
-          oninput={(e) => debounce("textColor", () => onUpdate({ textColor: (e.target as HTMLInputElement).value }), 150)}
-        />
-      </label>
+      {@render swatch(style.textColor, (v) => debounce("textColor", () => onUpdate({ textColor: v }), 150))}
 
       <div class="dd min-w-[10rem] flex-1">
         <button
@@ -298,16 +283,7 @@
       Рамка
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <label class="swatch">
-        <span class="swatch-color" style:background-color={style.borderColor}></span>
-        <span class="swatch-hex">{style.borderColor.toUpperCase()}</span>
-        <input
-          type="color"
-          class="swatch-input"
-          value={style.borderColor}
-          oninput={(e) => debounce("borderColor", () => onUpdate({ borderColor: (e.target as HTMLInputElement).value }), 150)}
-        />
-      </label>
+      {@render swatch(style.borderColor, (v) => debounce("borderColor", () => onUpdate({ borderColor: v }), 150))}
       <PopoverSelect
         classes="w-32"
         value={style.borderStyle}
@@ -363,16 +339,7 @@
       Тень текста
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <label class="swatch">
-        <span class="swatch-color" style:background-color={shadowColor}></span>
-        <span class="swatch-hex">{shadowColor.toUpperCase()}</span>
-        <input
-          type="color"
-          class="swatch-input"
-          value={shadowColor}
-          oninput={(e) => { shadowColor = (e.target as HTMLInputElement).value; onShadowChange(); }}
-        />
-      </label>
+      {@render swatch(shadowColor, (v) => { shadowColor = v; onShadowChange(); })}
       <NumberStepper
         label="X"
         unit="px"

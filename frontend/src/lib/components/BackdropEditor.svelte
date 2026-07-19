@@ -7,6 +7,7 @@
     parseGradient,
     stringifyGradient,
   } from "$lib/gradient";
+  import { createDebouncer } from "$lib/debounce";
   import { imageUrl } from "$lib/receiver";
   import GradientEditor from "./GradientEditor.svelte";
   import MuiIcon from "./MuiIcon.svelte";
@@ -27,12 +28,8 @@
     onDeleteImage: (id: number) => void;
   } = $props();
 
-  let timers: Record<string, ReturnType<typeof setTimeout>> = {};
-  function debounce(key: string, fn: () => void, ms = 150) {
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(fn, ms);
-  }
-  $effect(() => () => Object.values(timers).forEach(clearTimeout));
+  const { debounce, cancelAll } = createDebouncer();
+  $effect(() => cancelAll);
 
   let fileInput = $state<HTMLInputElement | null>(null);
   let uploading = $state(false);
@@ -118,24 +115,14 @@
 
   <!-- Type -->
   <div class="join">
-    <button
-      class="btn btn-sm join-item {backdrop.bgType === 'none' ? 'btn-neutral' : 'btn-outline'}"
-      onclick={() => setBgType("none")}
-    >
-      Нет
-    </button>
-    <button
-      class="btn btn-sm join-item {backdrop.bgType === 'gradient' ? 'btn-neutral' : 'btn-outline'}"
-      onclick={() => setBgType("gradient")}
-    >
-      Градиент
-    </button>
-    <button
-      class="btn btn-sm join-item {backdrop.bgType === 'image' ? 'btn-neutral' : 'btn-outline'}"
-      onclick={() => setBgType("image")}
-    >
-      Картинка
-    </button>
+    {#each [{ v: "none", l: "Нет" }, { v: "gradient", l: "Градиент" }, { v: "image", l: "Картинка" }] as opt (opt.v)}
+      <button
+        class="btn btn-sm join-item {backdrop.bgType === opt.v ? 'btn-neutral' : 'btn-outline'}"
+        onclick={() => setBgType(opt.v as "none" | "gradient" | "image")}
+      >
+        {opt.l}
+      </button>
+    {/each}
   </div>
 
   {#if backdrop.bgType === "gradient"}
