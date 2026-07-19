@@ -27,21 +27,21 @@
   );
 
   let dropdownContentEl = $state<HTMLUListElement | null>(null);
-  let windowHeight = $state(0);
-  $effect(() => {
-    shownItems;
-    if (!dropdownContentEl || !windowHeight) return;
-    const maxHeight =
-      windowHeight - dropdownContentEl.getBoundingClientRect().top - 10;
-    if (dropdownContentEl.scrollHeight <= maxHeight) return;
-    dropdownContentEl.style.height = `${maxHeight}px`;
-  });
-
   let inputEl = $state<HTMLInputElement | null>(null);
+  let windowHeight = $state(0);
+
+  // Fit the dropdown to the input width and cap its height to the viewport.
   $effect(() => {
-    shownItems;
-    if (!inputEl || !dropdownContentEl) return;
-    dropdownContentEl.style.width = `${inputEl.getBoundingClientRect().width}px`;
+    shownItems; // re-measure whenever the filtered list changes
+    const el = dropdownContentEl;
+    if (!el) return;
+    if (inputEl) {
+      el.style.width = `${inputEl.getBoundingClientRect().width}px`;
+    }
+    if (windowHeight) {
+      const maxHeight = windowHeight - el.getBoundingClientRect().top - 10;
+      el.style.height = el.scrollHeight > maxHeight ? `${maxHeight}px` : "";
+    }
   });
 </script>
 
@@ -60,7 +60,7 @@
     bind:this={dropdownContentEl}
   >
     {#each shownItems as item}
-      <li onfocus={console.log}>
+      <li>
         <button
           class="dropdown-item"
           onclick={(e) => {
