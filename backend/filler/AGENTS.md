@@ -17,6 +17,8 @@ Standalone seeder binary (own `package main`). Run once on a fresh DB to import 
 - This is a **separate `package main`** from the root app. Run with `go run ./backend/filler` from the repo root. Both binaries import `backend/inits`, so they share the same `test.db` (CWD-relative). Run the filler from the same directory you'll run `wails3 dev` from, or you'll seed the wrong file.
 - The seeder appends rather than upserts — running it twice creates duplicate "Синодальный" translation + duplicate books. Wipe `test.db` between runs.
 - `Bible.json` structure: array of books with `name` (short), `fullName`, `content[][]string` (chapters → verses). `songs.json` structure: array of songs with numeric `label` (parsed via `strconv.Atoi`, skipped on parse failure) and `couplets[]{label,text,index}`.
+- The Bible path is `os.Args[1]` when given, else `Bible.json` — `go run ./backend/filler tmp/bibles/nrt.json` seeds any exported translation. `readBibleFile` accepts both the bare array above and the self-describing `{name, shortName, source, books:[...]}` shape used by the in-app importer (`db_import.go`); for a bare array the translation is named "Синодальный"/"SND". Note the app's own importer is the normal path now — the filler stays for seeding a fresh DB together with songs.
+- Books get `Number = index+1` here as well: `getBooks` orders by that column, so a seeder that leaves it at 0 produces an arbitrarily ordered book list.
 - `songs.json` is gitignored (see root `.gitignore` / `git status`) — operator-specific song lists are not committed. Each install seeds from a locally provided file.
 - `Bible.json` is committed and ships with the repo.
 

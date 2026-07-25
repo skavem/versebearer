@@ -170,3 +170,118 @@ func TestGetTranslations_PreloadsOnlyFirstBranch(t *testing.T) {
 		t.Errorf("translations[0].Books[1].Chapters: want 0 (lazy), got %d", got)
 	}
 }
+
+const importFileJSON = `{
+  "name": "Тестовый перевод",
+  "shortName": "ТЕСТ",
+  "source": "unit-test",
+  "books": [
+    {"dividerBefore": "Ветхий Завет", "name": "Быт", "fullName": "Бытие",
+     "content": [["стих один", "стих два"], ["стих три"]]},
+    {"name": "Мф", "fullName": "От Матфея",
+     "content": [["стих четыре", "", "стих шесть"]]}
+  ]
+}`
+
+// A file that is a bare array of books (the pre-header Bible.json layout) still
+// has to import — the name then comes from the caller.
+const importBareJSON = `[{"name": "Быт", "fullName": "Бытие", "content": [["текст"]]}]`
+
+func TestImportTranslation_CountsAndSkipsEmptyVerses(t *testing.T) {
+	setupTestDB(t)
+	g := &DbHandler{}
+
+	res := g.ImportTranslation("", "", []byte(importFileJSON))
+	if res.Error != "" {
+		t.Fatalf("import failed: %s", res.Error)
+	}
+	if res.Name != "Тестовый перевод" || res.ShortName != "ТЕСТ" {
+		t.Errorf("header not picked up: %q / %q", res.Name, res.ShortName)
+	}
+	if res.Books != 2 || res.Chapters != 3 || res.Verses != 5 {
+		t.Errorf("want 2 books / 3 chapters / 5 verses, got %d / %d / %d",
+			res.Books, res.Chapters, res.Verses)
+	}
+
+	// The empty slot must not become a verse, and the verse after it keeps its
+	// original number so references stay correct.
+	var verses []models.Verse
+	inits.DB.Joins("JOIN chapters ON chapters.id = verses.chapter_id").
+		Joins("JOIN books ON books.id = chapters.book_id").
+		Where("books.short_name = ?", "Мф").Order("verses.number").Find(&verses)
+	if len(verses) != 2 {
+		t.Fatalf("Мф: want 2 verses, got %d", len(verses))
+	}
+	if verses[1].Number != 3 {
+		t.Errorf("verse after the gap: want number 3, got %d", verses[1].Number)
+	}
+
+	// Book order must survive the import — getBooks sorts by number.
+	var books []models.Book
+	inits.DB.Where("translation_id = ?", res.TranslationId).Order("number").Find(&books)
+	if len(books) != 2 || books[0].ShortName != "Быт" || books[1].Number != 2 {
+		t.Errorf("book numbering broken: %+v", books)
+	}
+}
+
+func TestImportTranslation_RejectsDuplicateName(t *testing.T) {
+	setupTestDB(t)
+	g := &DbHandler{}
+
+	if res := g.ImportTranslation("", "", []byte(importFileJSON)); res.Error != "" {
+		t.Fatalf("first import failed: %s", res.Error)
+	}
+	res := g.ImportTranslation("", "", []byte(importFileJSON))
+	if res.Error == "" {
+		t.Fatal("second import with the same name should fail")
+	}
+
+	var count int64
+	inits.DB.Model(&models.Translation{}).Count(&count)
+	if count != 1 {
+		t.Errorf("want 1 translation after the rejected import, got %d", count)
+	}
+}
+
+func TestImportTranslation_BareListNeedsName(t *testing.T) {
+	setupTestDB(t)
+	g := &DbHandler{}
+
+	if res := g.ImportTranslation("", "", []byte(importBareJSON)); res.Error == "" {
+		t.Error("headerless file without a name should be rejected")
+	}
+	res := g.ImportTranslation("Мой перевод", "МОЙ", []byte(importBareJSON))
+	if res.Error != "" {
+		t.Fatalf("named import of a headerless file failed: %s", res.Error)
+	}
+	if res.Name != "Мой перевод" || res.Verses != 1 {
+		t.Errorf("unexpected result: %+v", res)
+	}
+}
+
+func TestRemoveTranslation_CascadesAndKeepsLastOne(t *testing.T) {
+	setupTestDB(t)
+	g := &DbHandler{}
+
+	first := g.ImportTranslation("Первый", "ОДИН", []byte(importBareJSON))
+	if msg := g.RemoveTranslation(float32(first.TranslationId)); msg == "" {
+		t.Error("removing the only translation should be refused")
+	}
+
+	second := g.ImportTranslation("", "", []byte(importFileJSON))
+	if msg := g.RemoveTranslation(float32(second.TranslationId)); msg != "" {
+		t.Fatalf("remove failed: %s", msg)
+	}
+
+	var books, chapters, verses int64
+	inits.DB.Model(&models.Book{}).Where("translation_id = ?", second.TranslationId).Count(&books)
+	inits.DB.Model(&models.Chapter{}).Count(&chapters)
+	inits.DB.Model(&models.Verse{}).Count(&verses)
+	if books != 0 {
+		t.Errorf("books left behind: %d", books)
+	}
+	// Only the surviving translation's single chapter/verse may remain.
+	if chapters != 1 || verses != 1 {
+		t.Errorf("cascade leaked rows: chapters %d, verses %d", chapters, verses)
+	}
+}

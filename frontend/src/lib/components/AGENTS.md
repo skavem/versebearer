@@ -21,6 +21,7 @@ Reusable Svelte 5 components used by the three tab views. All in Svelte 5 runes 
 | `CreateEditCoupletModal.svelte` | Modal for both create and edit. Quick-fill buttons "Куплет"/"Припев"/"Бридж" for the label |
 | `EditSongTextModal.svelte` | Whole-song bulk-edit modal: textarea showing all couplets serialized via `$lib/songText#serializeSongText` (label-then-text, blocks separated by blank line). Save parses the text via `parseSongText` and calls `ReplaceCouplets(songId, blocks)` which atomically wipes and recreates the song's couplets |
 | `OutputCard.svelte` | Card per persisted `Output` entity. Inline-editable name, monitor/theme `PopoverSelect` dropdowns, transparent toggle (disabled while live), Start/StopOutput button, inline delete confirm |
+| `TranslationsSettings.svelte` | Bible translation manager inside `SettingsModal`: installed list (short label, книги/стихи, "сейчас на экране" flag), native-dialog file pick → preview → editable name/short label → import with a per-book progress bar, and delete-with-confirm. Owns no store — reads `ListTranslationSummaries` directly and lets the `translations_update` event refresh `BibleStore` |
 | `MuiIcon.svelte` | Renders a `<span class="material-icons">` with a typed `name` prop |
 | `MuiIcon.ts` | `const iconNames = [...] as const; export type MuiIconNames = (typeof iconNames)[number]` — huge string literal union of valid icon names |
 

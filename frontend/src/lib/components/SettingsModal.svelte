@@ -5,6 +5,7 @@
   } from "$lib/stores/settingsStore.svelte";
   import type { MuiIconNames } from "./MuiIcon";
   import MuiIcon from "./MuiIcon.svelte";
+  import TranslationsSettings from "./TranslationsSettings.svelte";
 
   let isOpen = $state(false);
 
@@ -70,6 +71,10 @@
           </div>
         {/if}
       </div>
+
+      <div class="divider my-3"></div>
+
+      <TranslationsSettings />
     </div>
     <button
       class="modal-backdrop"

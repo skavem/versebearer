@@ -49,10 +49,41 @@ const createBibleStore = () => {
   Events.On("hide_verse", () => {
     hideVerse();
   });
+  // Импорт/удаление перевода в настройках — подхватываем новый список.
+  Events.On("translations_update", () => {
+    BibleStore.translations.reload();
+  });
 
   const translations = {
     get loading() {
       return translationsLoading;
+    },
+    /**
+     * Перечитывает список переводов после импорта/удаления в настройках.
+     * Активный перевод сохраняется, если он ещё существует, — иначе выбирается
+     * первый, и каскад книга→глава→стих перезагружается под него.
+     */
+    async reload() {
+      const fresh = await GetTranslations();
+      const keep = fresh.find((t) => t.ID === activeTranslation?.ID);
+      translationsList = fresh;
+      translationsLoading = false;
+      if (keep) {
+        activeTranslation = keep;
+        return;
+      }
+      const first = fresh.at(0) ?? null;
+      if (!first) {
+        activeTranslation = null;
+        booksList = [];
+        activeBook = null;
+        chaptersList = [];
+        activeChapter = null;
+        versesList = [];
+        activeVerse = null;
+        return;
+      }
+      translations.active = first;
     },
     get list() {
       return translationsList;
