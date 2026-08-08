@@ -36,11 +36,12 @@
     }}
   >
     {#each couplets.list as couplet}
+      {@const isShown = shown?.ID === couplet.ID}
       <CoupletItem
         isActive={(couplets.active?.ID || 0) === couplet.ID}
-        isShown={shown?.ID === couplet.ID}
+        {isShown}
         ondblclick={() => {
-          if (shown?.ID === couplet.ID) {
+          if (isShown) {
             HideCouplet();
           } else {
             ShowCouplet(couplet.ID);
@@ -51,12 +52,9 @@
         item={couplet}
         multiline={true}
       >
-        {#snippet rightMark(i)}
-          {#if i.ID === shown?.ID}
-            <MuiIcon
-              name={"visibility"}
-              style="color: var(--fallback-s,oklch(var(--s)))"
-            />
+        {#snippet rightMark()}
+          {#if isShown}
+            <MuiIcon name={"visibility"} classes="text-secondary" />
           {/if}
         {/snippet}
         {#snippet leftMark()}

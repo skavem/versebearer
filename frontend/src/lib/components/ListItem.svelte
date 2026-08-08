@@ -41,11 +41,12 @@
   <div
     style:top={`${top}px`}
     class={[
-      "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
-      !isActive && "border-transparent",
-      // primary, а не neutral: в тёмной теме neutral — это почти цвет фона,
-      // рамка выделения пропадала. primary читается в обеих темах.
-      isActive && "border-primary bg-primary/10",
+      "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors",
+      // primary, а не neutral: в тёмной теме neutral почти сливается с фоном.
+      isActive ? "border-primary bg-primary/10" : "border-transparent",
+      // Подсветка при наведении непрозрачная и в CSS идёт последней — иначе
+      // затёрла бы заливку выбранной строки.
+      !isActive && "hover:bg-base-200",
     ]}
     {onclick}
     {ondblclick}

@@ -309,7 +309,9 @@
       title={!projecting && !canStart ? "Сначала выберите монитор" : undefined}
       class={[
         "btn btn-sm w-full",
-        projecting ? "btn-outline btn-error" : "btn-neutral",
+        // Янтарь = «в эфире»; красный зарезервирован за разрушительными
+        // действиями, а остановка трансляции — не разрушение.
+        projecting ? "btn-outline btn-secondary" : "btn-neutral",
       ]}
     >
       <MuiIcon

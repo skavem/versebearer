@@ -31,15 +31,16 @@
 <div
   bind:this={outerDiv}
   class={[
-    "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
-    !isActive && "border-transparent",
-    // primary, а не neutral: в тёмной теме neutral — это почти цвет фона,
-    // рамка выделения пропадала. primary читается в обеих темах.
-    isActive && "border-primary",
-    // Заливки взаимоисключающие: у двух bg-* одного веса порядок решает CSS,
-    // а не эта строка, поэтому янтарь «в эфире» задаётся явным приоритетом.
-    isActive && !isShown && "bg-primary/10",
-    isShown && "bg-secondary/20",
+    "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors",
+    // primary, а не neutral: в тёмной теме neutral почти сливается с фоном.
+    isActive ? "border-primary" : "border-transparent",
+    // Заливка одна, «в эфире» перебивает «выбрано»: у двух bg-* одного веса
+    // побеждает порядок в CSS, а не порядок в этой строке.
+    isShown ? "bg-secondary/20" : isActive && "bg-primary/10",
+    // Подсветка при наведении непрозрачная и в CSS идёт последней, так что
+    // затёрла бы обе заливки — а для показанной, но не выбранной строки
+    // заливка это единственная метка эфира.
+    !isActive && !isShown && "hover:bg-base-200",
   ]}
   {onclick}
   {ondblclick}
@@ -54,7 +55,7 @@
     >
 
     {#if isShown}
-      <MuiIcon name="visibility" style="color: var(--fallback-s,oklch(var(--s)))" />
+      <MuiIcon name="visibility" classes="text-secondary" />
     {/if}
   </div>
 </div>
