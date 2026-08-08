@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VerseBearer vs FreeShow — сравнение</title>
+<style>
+  :root {
+    --petrol-900: #0b2027;
+    --petrol-800: #10303a;
+    --petrol-700: #16414f;
+    --petrol-500: #1f6b80;
+    --petrol-300: #4d94a8;
+    --amber-500: #d99a2b;
+    --amber-300: #f0bc5e;
+    --red-500: #b4453a;
+
+    --bg: #f4f6f6;
+    --surface: #ffffff;
+    --surface-alt: #eef2f3;
+    --border: #d3dcdf;
+    --text: #14262c;
+    --text-dim: #5b7078;
+    --accent: var(--petrol-500);
+    --on-air: #b07b12;
+    --no: #a8564c;
+    --shadow: 0 1px 2px rgba(11,32,39,.06), 0 8px 24px rgba(11,32,39,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1418;
+      --surface: #10202a;
+      --surface-alt: #16303b;
+      --border: #244450;
+      --text: #dce9ec;
+      --text-dim: #8aa5ae;
+      --accent: var(--petrol-300);
+      --on-air: var(--amber-300);
+      --no: #d0776c;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0 20px 80px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 "Segoe UI", -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  header { padding: 44px 0 28px; border-bottom: 2px solid var(--border); margin-bottom: 30px; }
+  h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -.02em; font-weight: 650; }
+  h1 .vs { color: var(--text-dim); font-weight: 400; margin: 0 8px; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0; }
+
+  h2 {
+    margin: 46px 0 14px; font-size: 19px; font-weight: 640; letter-spacing: -.01em;
+    padding-left: 11px; border-left: 3px solid var(--accent);
+  }
+  h2 .hint { font-weight: 400; font-size: 13px; color: var(--text-dim); margin-left: 10px; }
+
+  /* --- сводные карточки --- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin-bottom: 8px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; box-shadow: var(--shadow);
+  }
+  .card .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); margin-bottom: 10px; }
+  .card .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .card .row .k { color: var(--text-dim); }
+  .card .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .row .v.vb { color: var(--accent); }
+  .card .row .v.fs { color: var(--on-air); }
+
+  /* --- таблица --- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; }
+  thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--surface-alt); color: var(--text);
+    text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    padding: 12px 14px; border-bottom: 2px solid var(--border); font-weight: 650;
+  }
+  thead th.vbcol { color: var(--accent); }
+  thead th.fscol { color: var(--on-air); }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--surface-alt); }
+  td.feat { font-weight: 560; width: 24%; }
+  td.vb, td.fs { width: 38%; font-size: 14px; }
+  .grp td {
+    background: var(--surface-alt); font-weight: 650; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim);
+    padding: 9px 14px;
+  }
+  .grp td:hover { background: var(--surface-alt); }
+
+  .mark { display: inline-block; width: 15px; margin-right: 7px; font-weight: 700; }
+  .yes .mark { color: var(--accent); }
+  .part .mark { color: var(--on-air); }
+  .no  { color: var(--text-dim); }
+  .no .mark { color: var(--no); }
+
+  /* --- итоговые блоки --- */
+  .verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .vcard { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .vcard h3 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
+  .vcard.a h3 { color: var(--accent); }
+  .vcard.b h3 { color: var(--on-air); }
+  .vcard ul { margin: 0; padding-left: 18px; }
+  .vcard li { margin-bottom: 7px; font-size: 14px; }
+  .vcard li:last-child { margin-bottom: 0; }
+
+  footer { margin-top: 46px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 13px; }
+  code { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; font-family: "Cascadia Mono", Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>VerseBearer <span class="vs">против</span> FreeShow</h1>
+  <p class="sub">Сравнение по исходному коду обоих проектов. FreeShow&nbsp;1.6.4 (ChurchApps, GPL-3.0) · VerseBearer&nbsp;— текущее состояние ветки <code>main</code>. Составлено 23 июля 2026&nbsp;г.</p>
+</header>
+
+<h2>Коротко о масштабе<span class="hint">цифры посчитаны по репозиториям, без node_modules и сборок</span></h2>
+<div class="cards">
+  <div class="card">
+    <div class="lbl">Объём кода</div>
+    <div class="row"><span class="k">VerseBearer</span><span class="v vb">~10 200 строк · 61 файл</span></div>
+    <div class="row"><span class="k">FreeShow</span><span class="v fs">~187 500 строк · 898 файлов</span></div>
+    <div class="row"><span class="k">Соотношение</span><span class="v">1 : 18</span></div>
+  </div>
+  <div class="card">
+    <div class="lbl">Технология</div>
+    <div class="row"><span class="k">VerseBearer</span><span class="v vb">Wails 3 · Go 1.25</span></div>
+    <div class="row"><span class="k">FreeShow</span><span class="v fs">Electron 37 · TS</span></div>
+    <div class="row"><span class="k">Интерфейс</span><span class="v">Svelte у обоих</span></div>
+  </div>
+  <div class="card">
+    <div class="lbl">Хранение данных</div>
+    <div class="row"><span class="k">VerseBearer</span><span class="v vb">SQLite (GORM)</span></div>
+    <div class="row"><span class="k">FreeShow</span><span class="v fs">JSON-файлы на диске</span></div>
+    <div class="row"><span class="k">Медиа в базе</span><span class="v">шрифты и фоны у VB</span></div>
+  </div>
+  <div class="card">
+    <div class="lbl">Зрелость</div>
+    <div class="row"><span class="k">Языки UI</span><span class="v"><span class="v vb">1</span> / <span class="v fs">31</span></span></div>
+    <div class="row"><span class="k">Лицензия</span><span class="v">нет / GPL-3.0</span></div>
+    <div class="row"><span class="k">Сетевые порты</span><span class="v">1 / 13</span></div>
+  </div>
+</div>
+
+<h2>Сравнительная таблица</h2>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Возможность</th>
+      <th class="vbcol">VerseBearer</th>
+      <th class="fscol">FreeShow</th>
+    </tr>
+  </thead>
+  <tbody>
+
+    <tr class="grp"><td colspan="3">Основа и платформа</td></tr>
+    <tr>
+      <td class="feat">Оболочка</td>
+      <td class="vb yes"><span class="mark">+</span>Wails 3 (alpha) — системный WebView, один Go-бинарник, без Node-рантайма</td>
+      <td class="fs yes"><span class="mark">+</span>Electron 37 — свой Chromium, дистрибутив в сотни МБ</td>
+    </tr>
+    <tr>
+      <td class="feat">Сборка под ОС</td>
+      <td class="vb yes"><span class="mark">+</span>Windows (NSIS), macOS (universal), Linux (deb/rpm/AppImage)</td>
+      <td class="fs yes"><span class="mark">+</span>То же + подпись Azure, нотаризация macOS, Snap, ARM-сборки</td>
+    </tr>
+    <tr>
+      <td class="feat">Хранение</td>
+      <td class="vb yes"><span class="mark">+</span>SQLite: переводы, песни, темы, шрифты и картинки — всё в одной базе</td>
+      <td class="fs yes"><span class="mark">+</span>Плоские JSON: файл <code>.show</code> на каждое шоу, <code>electron-store</code> на настройки</td>
+    </tr>
+    <tr>
+      <td class="feat">Языки интерфейса</td>
+      <td class="vb part"><span class="mark">~</span>Только русский, строки зашиты в разметку</td>
+      <td class="fs yes"><span class="mark">+</span>31 язык, перевод через Transifex, встроенный менеджер переводов</td>
+    </tr>
+    <tr>
+      <td class="feat">Лицензия</td>
+      <td class="vb no"><span class="mark">−</span>Файла LICENSE нет — проект юридически «без лицензии»</td>
+      <td class="fs yes"><span class="mark">+</span>GPL-3.0</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Библия</td></tr>
+    <tr>
+      <td class="feat">Источники текста</td>
+      <td class="vb part"><span class="mark">~</span>Один перевод — Синодальный из <code>Bible.json</code>, заливается отдельной утилитой до запуска</td>
+      <td class="fs yes"><span class="mark">+</span>11 локальных форматов (Zefania, OSIS, OpenSong, SoftProjector, BibleQuote, SQLite, MDB…) + онлайн-каталог API.Bible и YouVersion</td>
+    </tr>
+    <tr>
+      <td class="feat">Навигация и показ</td>
+      <td class="vb yes"><span class="mark">+</span>Перевод → книга → глава → стих, показ одним кликом, история показанного</td>
+      <td class="fs yes"><span class="mark">+</span>То же + поиск по тексту, разбор ссылок и диапазонов</td>
+    </tr>
+    <tr>
+      <td class="feat">Параллельные переводы</td>
+      <td class="vb no"><span class="mark">−</span>Нет — один стих одного перевода на экране</td>
+      <td class="fs yes"><span class="mark">+</span>До 4 версий одновременно, свой шаблон на каждую</td>
+    </tr>
+    <tr>
+      <td class="feat">Умная разбивка длинных стихов</td>
+      <td class="vb no"><span class="mark">−</span>Нет — стих выводится целиком, помещается за счёт стиля</td>
+      <td class="fs yes"><span class="mark">+</span>Автоделение по размерам текстового блока шаблона, лимит стихов на слайд</td>
+    </tr>
+    <tr>
+      <td class="feat">Мелочи оформления</td>
+      <td class="vb no"><span class="mark">−</span>Нет номеров стихов, ссылки, слов Иисуса красным</td>
+      <td class="fs yes"><span class="mark">+</span>Номера стихов, ссылка сверху/снизу/отдельным слайдом, слова Иисуса красным, стих дня</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Песни и тексты</td></tr>
+    <tr>
+      <td class="feat">Ведение песенника</td>
+      <td class="vb yes"><span class="mark">+</span>Создание и удаление песен, куплеты с ярлыком и порядком, массовая замена всего текста песни одним окном</td>
+      <td class="fs yes"><span class="mark">+</span>Полноценные «шоу» со слайдами, группами (куплет/припев/бридж), несколькими раскладками</td>
+    </tr>
+    <tr>
+      <td class="feat">Метаданные и отчётность</td>
+      <td class="vb part"><span class="mark">~</span>Только номер и название</td>
+      <td class="fs yes"><span class="mark">+</span>Автор, композитор, издатель, копирайт, CCLI, год, тональность + журнал использования песен для отчёта</td>
+    </tr>
+    <tr>
+      <td class="feat">Аккорды</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Расстановка аккордов над словами, транспонирование, смена тональности</td>
+    </tr>
+    <tr>
+      <td class="feat">Импорт из другого ПО</td>
+      <td class="vb no"><span class="mark">−</span>Только свой <code>songs.json</code> через отдельный бинарник</td>
+      <td class="fs yes"><span class="mark">+</span>~15 форматов: ProPresenter, EasyWorship, OpenLP, OpenSong, SongBeamer, Quelea, MediaShout, VideoPsalm, ChordPro, CSV, TXT, Word</td>
+    </tr>
+    <tr>
+      <td class="feat">Порядок песен на служение</td>
+      <td class="vb part"><span class="mark">~</span>Список «избранное» живёт только до перезапуска</td>
+      <td class="fs yes"><span class="mark">+</span>Проекты с папками, разделителями по времени, отметкой «сыграно», шаблонами проекта</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Что выводится на экран</td></tr>
+    <tr>
+      <td class="feat">Типы содержимого</td>
+      <td class="vb part"><span class="mark">~</span>Три вещи: стих, куплет, QR-код. Плюс подложка — цвет, градиент или картинка</td>
+      <td class="fs yes"><span class="mark">+</span>18+ типов элементов: текст, видео, изображение, камера, таймер, часы, погода, веб-страница, график, таблица, субтитры, метроном, визуализатор звука</td>
+    </tr>
+    <tr>
+      <td class="feat">Видео и звук</td>
+      <td class="vb no"><span class="mark">−</span>Полностью отсутствуют — ни одного тега <code>&lt;video&gt;</code>/<code>&lt;audio&gt;</code> в коде</td>
+      <td class="fs yes"><span class="mark">+</span>Видеоплеер с бесшовным зациклением, плейлисты, кроссфейд, микшер, 8 звуковых эффектов, метроном, YouTube и Vimeo</td>
+    </tr>
+    <tr>
+      <td class="feat">Живые источники</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Веб-камеры, захват экрана и окон, NDI-вход, Blackmagic SDI, запись в файл</td>
+    </tr>
+    <tr>
+      <td class="feat">Оформление текста</td>
+      <td class="vb yes"><span class="mark">+</span>По 11 свойств отдельно для стиха и куплета: фон и его прозрачность, цвет текста, свой шрифт, рамка (цвет/толщина/скругление/стиль), отступы, поля, тень</td>
+      <td class="fs yes"><span class="mark">+</span>Полный редактор слайда: ~135 параметров, автоподгонка размера, обводка, градиенты, CSS-фильтры, поворот и перспектива, бегущая строка, построчное раскрытие</td>
+    </tr>
+    <tr>
+      <td class="feat">Темы оформления</td>
+      <td class="vb yes"><span class="mark">+</span>Несколько именованных тем: создание, дублирование, применение; своя тема на каждый выход</td>
+      <td class="fs yes"><span class="mark">+</span>Темы + шаблоны слайдов + переопределение стиля по регулярному выражению</td>
+    </tr>
+    <tr>
+      <td class="feat">Переходы и анимация</td>
+      <td class="vb no"><span class="mark">−</span>Нет — смена содержимого мгновенная</td>
+      <td class="fs yes"><span class="mark">+</span>8 переходов × отдельно для текста/медиа/фона, 10+ функций плавности, покадровые анимации, таймлайн с ключевыми кадрами</td>
+    </tr>
+    <tr>
+      <td class="feat">Наложения (overlays)</td>
+      <td class="vb no"><span class="mark">−</span>Нет отдельного слоя</td>
+      <td class="fs yes"><span class="mark">+</span>Независимый слой поверх слайда, со своими действиями</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Окна вывода и мониторы</td></tr>
+    <tr>
+      <td class="feat">Несколько выходов</td>
+      <td class="vb yes"><span class="mark">+</span>Именованные выходы, каждый на своём мониторе, со своей темой, запуск и остановка по отдельности</td>
+      <td class="fs yes"><span class="mark">+</span>Неограниченно окон, у каждого свой стиль, границы, слои</td>
+    </tr>
+    <tr>
+      <td class="feat">Режимы окна</td>
+      <td class="vb yes"><span class="mark">+</span>Полный экран или окно с сохранением размера и позиции, тумблеры «без рамки» и «поверх всех»</td>
+      <td class="fs yes"><span class="mark">+</span>Полный экран, произвольные границы, «поверх всех», невидимое окно, блокировка границ</td>
+    </tr>
+    <tr>
+      <td class="feat">Прозрачный оверлей</td>
+      <td class="vb yes"><span class="mark">+</span>Текст парит поверх рабочего стола, окно прокликивается насквозь — удобно для захвата в OBS</td>
+      <td class="fs yes"><span class="mark">+</span>Прозрачные окна + отдельный key/alpha-выход (заливка и маска раздельно)</td>
+    </tr>
+    <tr>
+      <td class="feat">Защита от показа «на себя»</td>
+      <td class="vb yes"><span class="mark">+</span>Отслеживает монитор оператора, переспрашивает при попытке вывести туда же; <code>Ctrl+Shift+W</code> — быстрое переключение на второй экран</td>
+      <td class="fs part"><span class="mark">~</span>Есть «идентификация экранов», отдельного подтверждения нет</td>
+    </tr>
+    <tr>
+      <td class="feat">Сцена для музыкантов (stage display)</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Отдельный экран: текущий и следующий слайд, заметки, таймеры, часы, зеркало вывода, озвучка</td>
+    </tr>
+    <tr>
+      <td class="feat">Сшивка проекторов, разрешения</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Edge blending, обрезка, принудительное разрешение, соотношение сторон, тестовая таблица</td>
+    </tr>
+    <tr>
+      <td class="feat">Видеовыходы для трансляции</td>
+      <td class="vb no"><span class="mark">−</span>Нет (только косвенно — через захват прозрачного окна в OBS)</td>
+      <td class="fs yes"><span class="mark">+</span>NDI, Blackmagic SDI, WebRTC, RTMP через FFmpeg, звук в Icecast</td>
+    </tr>
+    <tr>
+      <td class="feat">Рисование поверх картинки</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Кисть, указка, зум, подсветка области, частицы</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Планирование служения</td></tr>
+    <tr>
+      <td class="feat">План служения</td>
+      <td class="vb no"><span class="mark">−</span>Нет — оператор ищет нужное вручную по ходу</td>
+      <td class="fs yes"><span class="mark">+</span>Проекты: песни, видео, PDF, разделы с хронометражом, шаблоны, автоимя по дате</td>
+    </tr>
+    <tr>
+      <td class="feat">Календарь и события</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>События с повторами, импорт iCal, действия по расписанию</td>
+    </tr>
+    <tr>
+      <td class="feat">Таймеры и обратный отсчёт</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Счётчики, до времени, до события, PCO Live; предупреждения, переполнение, мигание</td>
+    </tr>
+    <tr>
+      <td class="feat">Синхронизация по таймкоду</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>LTC (звуковой) и MTC (MIDI), режим Ableton</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Управление и интеграции</td></tr>
+    <tr>
+      <td class="feat">Удалённое управление</td>
+      <td class="vb no"><span class="mark">−</span>Нет. Канал SSE односторонний: программа → проектор, команды принимать не умеет</td>
+      <td class="fs yes"><span class="mark">+</span>4 веб-клиента в браузере телефона или планшета: пульт (5510), сцена (5511), контроллер (5512), зеркало вывода (5513); пароль, лимит подключений, QR-подключение, поиск по сети через Bonjour</td>
+    </tr>
+    <tr>
+      <td class="feat">Внешнее API</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>~155 действий по WebSocket, REST и OSC; готовый модуль для Bitfocus Companion</td>
+    </tr>
+    <tr>
+      <td class="feat">MIDI</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Приём (запуск действий по нотам и CC) и отправка</td>
+    </tr>
+    <tr>
+      <td class="feat">Внешние программы</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>OBS Studio (сцены, запись, стрим), Spotify (управление воспроизведением)</td>
+    </tr>
+    <tr>
+      <td class="feat">Церковные сервисы</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Planning Center Online (планы, песни, PCO Live), ChurchApps, Canva, AmazingLife</td>
+    </tr>
+    <tr>
+      <td class="feat">Облако и синхронизация</td>
+      <td class="vb no"><span class="mark">−</span>Нет — база лежит только локально</td>
+      <td class="fs yes"><span class="mark">+</span>Google Drive и ChurchApps: слияние, только чтение, выгрузка, полная замена; журнал синхронизации</td>
+    </tr>
+    <tr>
+      <td class="feat">Реакция зала</td>
+      <td class="vb part"><span class="mark">~</span>Показ QR-кода на выводе — и всё</td>
+      <td class="fs yes"><span class="mark">+</span>Опросы и викторины через Firebase: варианты ответов, баллы, лимит времени, слайд с результатами</td>
+    </tr>
+
+    <tr class="grp"><td colspan="3">Данные, надёжность, эксплуатация</td></tr>
+    <tr>
+      <td class="feat">Экспорт и резервные копии</td>
+      <td class="vb no"><span class="mark">−</span>Из интерфейса не выгрузить ничего — только копировать файл базы вручную</td>
+      <td class="fs yes"><span class="mark">+</span>Экспорт в PDF, TXT, изображения, архив проекта, полный бэкап; автосохранение и автобэкап</td>
+    </tr>
+    <tr>
+      <td class="feat">Отмена действия</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>История с отменой и повтором</td>
+    </tr>
+    <tr>
+      <td class="feat">Обновления</td>
+      <td class="vb no"><span class="mark">−</span>Нет механизма — переустановка вручную</td>
+      <td class="fs yes"><span class="mark">+</span>Автообновление, бета-канал, уведомления</td>
+    </tr>
+    <tr>
+      <td class="feat">Разграничение прав</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Профили пользователей с правами, скрытие вкладок, пароль</td>
+    </tr>
+    <tr>
+      <td class="feat">Сбор ошибок</td>
+      <td class="vb no"><span class="mark">−</span>Нет</td>
+      <td class="fs yes"><span class="mark">+</span>Sentry, журнал ошибок, отправка отчётов по согласию</td>
+    </tr>
+    <tr>
+      <td class="feat">Тесты</td>
+      <td class="vb part"><span class="mark">~</span>Go smoke-тесты на базу (SQLite в памяти) + проверка типов фронтендов</td>
+      <td class="fs yes"><span class="mark">+</span>Vitest, Playwright, svelte-check, ESLint, Stylelint</td>
+    </tr>
+
+  </tbody>
+</table>
+</div>
+
+<h2>Итог</h2>
+<div class="verdict">
+  <div class="vcard a">
+    <h3>Где VerseBearer выигрывает</h3>
+    <ul>
+      <li><b>Порог входа для оператора.</b> Четыре вкладки против 75 групп настроек. Человека можно посадить за программу за пять минут без обучения.</li>
+      <li><b>Вес и запуск.</b> Один Go-бинарник на системном WebView вместо полного Chromium — меньше дистрибутив, быстрее старт, меньше памяти.</li>
+      <li><b>Целостность данных.</b> SQLite с транзакциями и миграциями вместо россыпи JSON-файлов; шрифты и фоны лежат в той же базе, переносится одним файлом.</li>
+      <li><b>Заточка под задачу.</b> Синодальный текст, русский интерфейс, куплеты как первичная сущность — ровно то, что нужно на служении, без слоя абстракций «шоу → раскладка → слайд → элемент».</li>
+      <li><b>Прокликиваемый оверлей.</b> Готовый режим «текст поверх рабочего стола» под захват в OBS без настройки key/alpha-выходов.</li>
+      <li><b>Защита от показа на монитор оператора</b> — мелочь, которой у FreeShow в явном виде нет.</li>
+    </ul>
+  </div>
+  <div class="vcard b">
+    <h3>Где отставание принципиальное</h3>
+    <ul>
+      <li><b>Нет медиа вообще.</b> Ни видеофона, ни звука, ни картинки-иллюстрации, ни камеры. Для многих общин это отсекающее требование.</li>
+      <li><b>Нет плана служения.</b> Оператор ищет каждую песню вручную по ходу — самая частая причина заминок на сцене.</li>
+      <li><b>Нет удалённого управления.</b> Ни телефона-пульта, ни экрана для музыкантов, ни второго оператора.</li>
+      <li><b>Нет импорта.</b> Песенник нельзя перенести из ProPresenter, OpenLP или EasyWorship — переезд означает ручной ввод.</li>
+      <li><b>Нет экспорта и бэкапа из интерфейса.</b> Единственная копия — файл базы, о котором пользователь должен знать сам.</li>
+      <li><b>Один перевод Библии.</b> Ни параллельных версий, ни поиска, ни номеров стихов, ни ссылки на экране.</li>
+      <li><b>Нет лицензии в репозитории</b> — формально код нельзя ни распространять, ни принимать в него вклад.</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  Сравнение выведено из статического анализа кода обоих проектов: <code>C:\Users\SyncthingServiceAcct\Projects\versebearer</code> и <code>C:\Users\SyncthingServiceAcct\Projects\FreeShow</code> (клон <code>--depth 1</code> с github.com/ChurchApps/FreeShow, версия 1.6.4).
+  Отмеченное как отсутствующее проверялось поиском по коду, а не по документации. Часть возможностей FreeShow требует внешних компонентов — FFmpeg, LibreOffice, NDI-рантайм, Blackmagic SDK — и без них недоступна.
+</footer>
+
+</div>
+</body>
+</html>
