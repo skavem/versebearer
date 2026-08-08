@@ -66,7 +66,9 @@
 
   $effect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "l")) {
+      // Сравниваем по code, а не по key: key отдаёт символ текущей раскладки,
+      // и на русской Ctrl+F приходит как «а» — сочетание не срабатывало.
+      if ((e.ctrlKey || e.metaKey) && (e.code === "KeyF" || e.code === "KeyL")) {
         searchField?.focus();
         e.preventDefault();
         return;
