@@ -2,26 +2,31 @@
 <plist version="1.0">
     <dict>
         <key>CFBundlePackageType</key>
-        <string>APPL</string>
+            <string>APPL</string>
         <key>CFBundleName</key>
-        <string>My Product</string>
+            <string>My Product</string>
         <key>CFBundleExecutable</key>
-        <string>versebearer.exe</string>
+            <string>versebearer</string>
         <key>CFBundleIdentifier</key>
-        <string>com.wails.versebearer</string>
+            <string>com.mycompany.myproduct</string>
         <key>CFBundleVersion</key>
-        <string>0.1.0</string>
+            <string>v0.0.1</string>
         <key>CFBundleGetInfoString</key>
-        <string>This is a comment</string>
+            <string>Some Product Comments</string>
         <key>CFBundleShortVersionString</key>
-        <string>0.1.0</string>
+            <string>v0.0.1</string>
         <key>CFBundleIconFile</key>
-        <string>icons</string>
+            <string>icons</string>
         <key>LSMinimumSystemVersion</key>
-        <string>10.13.0</string>
+            <string>12.0.0</string>
         <key>NSHighResolutionCapable</key>
-        <string>true</string>
+            <string>true</string>
         <key>NSHumanReadableCopyright</key>
-        <string>© now, My Company</string>
+            <string>(c) 2024, My Company</string>
+        <key>NSAppTransportSecurity</key>
+        <dict>
+            <key>NSAllowsLocalNetworking</key>
+            <true/>
+        </dict>
     </dict>
 </plist>

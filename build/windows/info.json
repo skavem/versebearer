@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "v0.0.1"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "v0.0.1",
+			"CompanyName": "My Company",
+			"FileDescription": "A program that does X",
+			"LegalCopyright": "(c) 2024, My Company",
+			"ProductName": "My Product",
+			"Comments": "Some Product Comments"
+		}
+	}
+}

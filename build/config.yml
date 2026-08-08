@@ -38,10 +38,12 @@ dev_mode:
       type: background
     - cmd: go mod tidy
       type: blocking
-    # build:dev, а не build: без тега production окно берёт фронт с vite, и
-    # правки в .svelte видны сразу. Обычный build вшивает dist в бинарь, и
-    # тогда фронт обновляется только вместе с пересборкой Go.
-    - cmd: wails3 task build:dev
+    # DEV=true, а не просто build: без тега production окно берёт фронт с vite,
+    # и правки в .svelte видны сразу. Обычный build вшивает dist в бинарь, и
+    # тогда фронт обновляется только вместе с пересборкой Go. Значение задано
+    # явно, а не через унаследованное окружение, чтобы режим не зависел от того,
+    # чем запущен сам `wails3 dev`.
+    - cmd: wails3 task build DEV=true
       type: blocking
     # Receiver (projector) is served from reciever/dist on disk; keep it rebuilt
     # on change. Started after the initial build so its first pass doesn't race

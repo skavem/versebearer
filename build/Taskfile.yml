@@ -4,21 +4,21 @@ tasks:
   go:mod:tidy:
     summary: Runs `go mod tidy`
     internal: true
-    generates:
-      - go.sum
-    sources:
-      - go.mod
+    # Параллельные ветки сборки зовут эту цель одновременно, а два `go mod tidy`
+    # разом портят go.mod — отсюда `run: once`.
+    run: once
     cmds:
       - go mod tidy
 
   install:frontend:deps:
     summary: Install frontend dependencies
+    run: once
     dir: frontend
     sources:
       - package.json
       - package-lock.json
     generates:
-      - node_modules/*
+      - node_modules
     preconditions:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
@@ -27,38 +27,53 @@ tasks:
 
   build:frontend:
     summary: Build the frontend project
+    # Сборка каждой архитектуры зависит от этой цели; без `run: once` две из них
+    # гонятся за каталог bindings — один процесс его чистит, пока другой читает.
+    run: once
     dir: frontend
     sources:
       - "**/*"
+      - exclude: node_modules/**/*
     generates:
-      - dist/*
+      - dist/**/*
     deps:
       - task: install:frontend:deps
       - task: generate:bindings
+        vars:
+          BUILD_FLAGS:
+            ref: .BUILD_FLAGS
     cmds:
       - npm run build -q
 
   generate:bindings:
     summary: Generates bindings for the frontend
+    run: once
+    deps:
+      - task: go:mod:tidy
     sources:
       - "**/*.go"
       - go.mod
       - go.sum
     generates:
       - "frontend/src/lib/bindings/**/*"
+    # Каталог задан явно: по умолчанию Wails кладёт биндинги в frontend/bindings,
+    # а фронт импортирует их как `$lib/bindings/...`. Каталог целиком
+    # генерируемый и в .gitignore, поэтому -clean (снос перед генерацией, чтобы
+    # не оставались файлы удалённых сервисов) безопасен.
     cmds:
-      - wails3 generate bindings -d ./frontend/src/lib/bindings -f '{{.BUILD_FLAGS}}'{{if .UseTypescript}} -ts{{end}}
+      - wails3 generate bindings -d ./frontend/src/lib/bindings -clean=true -f '{{.BUILD_FLAGS}}'
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` files from an image
+    run: once
     dir: build
     sources:
       - "appicon.png"
     generates:
-      - "icons.icns"
-      - "icons.ico"
+      - "darwin/icons.icns"
+      - "windows/icon.ico"
     cmds:
-      - wails3 generate icons -input appicon.png -windowsfilename icon.ico -macfilename icons.icns
+      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:
     summary: Runs the frontend in development mode
@@ -75,7 +90,7 @@ tasks:
       - package.json
       - package-lock.json
     generates:
-      - node_modules/*
+      - node_modules
     preconditions:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
@@ -84,11 +99,13 @@ tasks:
 
   build:reciever:
     summary: Build the receiver (projector) project into reciever/dist (embedded by sse.go)
+    run: once
     dir: reciever
     sources:
       - "**/*"
+      - exclude: node_modules/**/*
     generates:
-      - dist/*
+      - dist/**/*
     deps:
       - task: install:reciever:deps
     cmds:

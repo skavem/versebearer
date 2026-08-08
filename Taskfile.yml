@@ -1,81 +1,53 @@
 version: '3'
 
 includes:
-  common: ./build/Taskfile.common.yml
-  windows: ./build/Taskfile.windows.yml
-  darwin: ./build/Taskfile.darwin.yml
-  linux: ./build/Taskfile.linux.yml
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
 
 vars:
   APP_NAME: "versebearer"
   BIN_DIR: "bin"
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
-  PRODUCTION: "true"
+  # Целевая ОС сборки. По умолчанию — та, на которой запускаемся; задаётся
+  # явно (`wails3 task build GOOS=linux`) для кросс-компиляции.
+  GOOS: '{{.GOOS | default OS}}'
+  # Режим сборки. DEV=true — без тега production, см. комментарий к BUILD_FLAGS
+  # в build/windows/Taskfile.yml. Значение по умолчанию задано здесь, чтобы
+  # платформенным веткам всегда было что сравнивать.
+  DEV: '{{.DEV | default "false"}}'
 
 tasks:
   build:
     summary: Builds the application
     cmds:
-      - task: "{{OS}}:build"
-
-  build:dev:
-    summary: Builds the application for `dev` — no `production` tag
-    # Без тега production Wails компилирует dev-ветку assetserver'а: она видит
-    # FRONTEND_DEVSERVER_URL (его выставляет `wails3 dev`) и проксирует фронт на
-    # vite вместо вшитого frontend/dist. Отсюда живая перезагрузка Svelte.
-    # С тегом production та же функция возвращает пустую строку, окно намертво
-    # показывает содержимое бинаря, и правки фронта видны только после
-    # пересборки Go. Именно поэтому dev собирается отдельной целью.
-    cmds:
-      - task: "{{OS}}:build"
-        vars:
-          PRODUCTION: "false"
+      - task: "{{.GOOS}}:build"
 
   package:
     summary: Packages a production build of the application
     cmds:
-      - task: "{{OS}}:package"
+      - task: "{{.GOOS}}:package"
 
   run:
     summary: Runs the application
     cmds:
-      - task: "{{OS}}:run"
+      - task: "{{.GOOS}}:run"
 
   dev:
     summary: Runs the application in development mode
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
     env:
-      PRODUCTION: "false"
-      # Dev-only: serve the receiver from reciever/dist on disk so the
-      # common:dev:reciever watcher's rebuilds show up live (no Go recompile).
-      # Inherited by the app the dev pipeline launches. godotenv.Load() is
-      # non-overriding, so this beats DEV=false in .env. A normal `task build`
-      # never sets DEV, so packaged/built runs keep serving the embedded copy.
+      # DEV читают двое. Сборка — чтобы не ставить тег production и отдать фронт
+      # vite-серверу (живая перезагрузка Svelte). Само приложение — чтобы брать
+      # приёмник из reciever/dist на диске, где его пересобирает watcher, а не
+      # из вшитой копии. godotenv.Load() не перетирает уже заданное окружение,
+      # так что это значение бьёт DEV=false из .env; обычный `task build` DEV не
+      # выставляет, поэтому собранная и упакованная версии берут вшитую копию.
       DEV: "true"
 
   test:
     summary: Runs Go unit tests (in-memory SQLite, no Wails/frontend deps)
     cmds:
       - go test ./...
-
-  darwin:build:universal:
-    summary: Builds darwin universal binary (arm64 + amd64)
-    cmds:
-      - task: darwin:build
-        vars:
-          ARCH: amd64
-      - mv {{.BIN_DIR}}/{{.APP_NAME}} {{.BIN_DIR}}/{{.APP_NAME}}-amd64
-      - task: darwin:build
-        vars:
-          ARCH: arm64
-      - mv {{.BIN_DIR}}/{{.APP_NAME}} {{.BIN_DIR}}/{{.APP_NAME}}-arm64
-      - lipo -create -output {{.BIN_DIR}}/{{.APP_NAME}} {{.BIN_DIR}}/{{.APP_NAME}}-amd64 {{.BIN_DIR}}/{{.APP_NAME}}-arm64
-      - rm {{.BIN_DIR}}/{{.APP_NAME}}-amd64 {{.BIN_DIR}}/{{.APP_NAME}}-arm64
-
-  darwin:package:universal:
-    summary: Packages darwin universal binary (arm64 + amd64)
-    deps:
-      - darwin:build:universal
-    cmds:
-      - task: darwin:create:app:bundle
