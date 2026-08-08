@@ -181,18 +181,49 @@ func (b *docBatcher) flush() error {
 }
 
 // indexAllCouplets переиндексирует все куплеты всех песен.
+//
+// В конце сверяется с базой. Пока идёт запись, оператор может удалить куплет:
+// его точечный хук отработает по ещё не записанному документу, то есть впустую,
+// а пачка, снятая до удаления, следом внесёт этот куплет в индекс — и он
+// останется там навсегда, находясь поиском. Второй проход по идентификаторам
+// снимает разницу; удаление, случившееся уже после него, свой документ застаёт
+// на месте и убирает само.
 func (g *DbHandler) indexAllCouplets() error {
 	var couplets []models.Couplet
 	if err := inits.DB.Find(&couplets).Error; err != nil {
 		return err
 	}
 	batch := docBatcher{idx: g.searchIdx}
+	written := make([]uint, 0, len(couplets))
 	for _, c := range couplets {
 		if err := batch.add(search.Doc{ID: c.ID, Kind: search.KindCouplet, Text: c.Text}); err != nil {
 			return err
 		}
+		written = append(written, c.ID)
 	}
-	return batch.flush()
+	if err := batch.flush(); err != nil {
+		return err
+	}
+
+	var alive []uint
+	if err := inits.DB.Model(&models.Couplet{}).Pluck("id", &alive).Error; err != nil {
+		return err
+	}
+	aliveSet := make(map[uint]struct{}, len(alive))
+	for _, id := range alive {
+		aliveSet[id] = struct{}{}
+	}
+	var gone []uint
+	for _, id := range written {
+		if _, ok := aliveSet[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	log.Println("Removing couplets deleted during rebuild", len(gone))
+	return g.searchIdx.DeleteBatch(search.KindCouplet, gone)
 }
 
 // Хуки синхронизации. Все они «тихие»: рассинхрон индекса не должен ронять

@@ -5,7 +5,19 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"unicode/utf16"
 )
+
+// sliceUTF16 режет строку так же, как это делает String.prototype.slice в JS —
+// по единицам UTF-16. Именно в них Highlight отдаёт свои позиции, и именно так
+// они применяются на фронте.
+func sliceUTF16(s string, start, length int) string {
+	units := utf16.Encode([]rune(s))
+	if start < 0 || start+length > len(units) {
+		return ""
+	}
+	return string(utf16.Decode(units[start : start+length]))
+}
 
 func TestNormalize(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -60,25 +72,40 @@ func TestExpandUnknownWords(t *testing.T) {
 	}
 }
 
-// Позиции подсветки считаются в рунах и должны корректно резать строку на
-// стороне JS — здесь это моделируется срезом по рунам.
-func TestHighlightRunePositions(t *testing.T) {
+// Позиции подсветки считаются в единицах UTF-16 и должны корректно резать
+// строку на стороне JS — здесь это моделируется тем же срезом.
+func TestHighlightUTF16Positions(t *testing.T) {
 	text := "Ибо так возлюбил Бог мир, что отдал Сына Своего"
 	matches := Highlight(text, QueryTerms("возлюбил мир"))
 	if len(matches) != 2 {
 		t.Fatalf("ожидалось 2 совпадения, получено %d: %v", len(matches), matches)
 	}
-	runes := []rune(text)
 	got := []string{}
 	for _, m := range matches {
-		if m.Start < 0 || m.Start+m.Len > len(runes) {
-			t.Fatalf("совпадение выходит за границы: %+v при длине %d", m, len(runes))
+		s := sliceUTF16(text, m.Start, m.Len)
+		if s == "" {
+			t.Fatalf("совпадение выходит за границы: %+v", m)
 		}
-		got = append(got, string(runes[m.Start:m.Start+m.Len]))
+		got = append(got, s)
 	}
 	want := []string{"возлюбил", "мир"}
 	if !slices.Equal(got, want) {
 		t.Errorf("подсвечено %v, ожидалось %v", got, want)
+	}
+}
+
+// Текст куплетов пишет оператор, и туда попадают эмодзи. Символ вне BMP стоит
+// две единицы UTF-16 при одной руне: считай Highlight в рунах — и всё, что
+// стоит после эмодзи, подсветилось бы со сдвигом, а срез пришёлся бы на
+// середину суррогатной пары.
+func TestHighlightAfterAstralChar(t *testing.T) {
+	text := "Хвала 🙌 Господу вовеки"
+	matches := Highlight(text, QueryTerms("господь"))
+	if len(matches) != 1 {
+		t.Fatalf("ожидалось 1 совпадение, получено %d: %v", len(matches), matches)
+	}
+	if got := sliceUTF16(text, matches[0].Start, matches[0].Len); got != "Господу" {
+		t.Errorf("подсвечено %q, ожидалось \"Господу\"", got)
 	}
 }
 
@@ -90,8 +117,7 @@ func TestHighlightMatchesOtherForm(t *testing.T) {
 	if len(matches) == 0 {
 		t.Fatal("морфологическое совпадение не подсвечено")
 	}
-	runes := []rune("Так говорит Господь людям Своим")
-	if got := string(runes[matches[0].Start : matches[0].Start+matches[0].Len]); got != "людям" {
+	if got := sliceUTF16("Так говорит Господь людям Своим", matches[0].Start, matches[0].Len); got != "людям" {
 		t.Errorf("подсвечено %q, ожидалось \"людям\"", got)
 	}
 }
