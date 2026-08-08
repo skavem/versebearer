@@ -18,6 +18,19 @@ tasks:
     cmds:
       - task: "{{OS}}:build"
 
+  build:dev:
+    summary: Builds the application for `dev` — no `production` tag
+    # Без тега production Wails компилирует dev-ветку assetserver'а: она видит
+    # FRONTEND_DEVSERVER_URL (его выставляет `wails3 dev`) и проксирует фронт на
+    # vite вместо вшитого frontend/dist. Отсюда живая перезагрузка Svelte.
+    # С тегом production та же функция возвращает пустую строку, окно намертво
+    # показывает содержимое бинаря, и правки фронта видны только после
+    # пересборки Go. Именно поэтому dev собирается отдельной целью.
+    cmds:
+      - task: "{{OS}}:build"
+        vars:
+          PRODUCTION: "false"
+
   package:
     summary: Packages a production build of the application
     cmds:
