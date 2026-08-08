@@ -81,8 +81,13 @@
 <div
   class={[
     "group/card card border bg-base-100 transition-all",
-    projecting ? "border-neutral shadow-md shadow-neutral/20" : "border-base-300",
-    isCurrent && "ring-2 ring-secondary ring-offset-2 ring-offset-base-100",
+    // Янтарь = эфир, синий = «окно оператора здесь». neutral для эфира не
+    // годился: в тёмной теме он темнее рамки простой карточки, и работающий
+    // выход выглядел тусклее простаивающего.
+    projecting
+      ? "border-secondary shadow-md shadow-secondary/20"
+      : "border-base-300",
+    isCurrent && "ring-2 ring-primary ring-offset-2 ring-offset-base-100",
   ]}
 >
   <div class="card-body gap-3 p-4">
@@ -91,7 +96,7 @@
         <div
           class={[
             "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-            projecting ? "bg-neutral text-neutral-content" : "bg-base-200",
+            projecting ? "bg-secondary text-secondary-content" : "bg-base-200",
           ]}
         >
           <MuiIcon name="output" style="font-size: 1.5rem" />
@@ -134,10 +139,10 @@
             <span class="badge badge-sm badge-ghost">Основной</span>
           {/if}
           {#if isCurrent}
-            <span class="badge badge-sm badge-secondary">Здесь</span>
+            <span class="badge badge-sm badge-primary">Здесь</span>
           {/if}
           {#if projecting}
-            <span class="badge badge-sm badge-neutral gap-1">
+            <span class="badge badge-sm badge-secondary gap-1">
               <span class="oc-live-dot" aria-hidden="true"></span>
               В эфире
             </span>
@@ -391,7 +396,8 @@
     width: 0.375rem;
     height: 0.375rem;
     border-radius: 9999px;
-    background-color: oklch(var(--nc));
+    /* --sc = secondary-content: точка живёт внутри янтарного бейджа «В эфире» */
+    background-color: oklch(var(--sc));
     animation: oc-pulse 1.6s ease-in-out infinite;
   }
   @keyframes oc-pulse {

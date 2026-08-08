@@ -104,9 +104,10 @@
           ry="6"
           class={[
             "transition-all",
-            projecting ? "fill-neutral" : "fill-base-200",
+            // Янтарь = эфир, синий = «окно оператора здесь» — как в OutputCard.
+            projecting ? "fill-secondary" : "fill-base-200",
             "stroke-2",
-            isCurrent ? "stroke-secondary" : "stroke-base-300",
+            isCurrent ? "stroke-primary" : "stroke-base-300",
             !output && "opacity-50",
           ]}
         />
@@ -117,7 +118,7 @@
           dominant-baseline="middle"
           class={[
             "text-[16px] font-bold",
-            projecting ? "fill-neutral-content" : "fill-base-content",
+            projecting ? "fill-secondary-content" : "fill-base-content",
           ]}
         >
           {i + 1}
@@ -129,7 +130,7 @@
           dominant-baseline="middle"
           class={[
             "text-[9px]",
-            projecting ? "fill-neutral-content/80" : "fill-base-content/60",
+            projecting ? "fill-secondary-content/80" : "fill-base-content/60",
           ]}
         >
           {output ? output.name : s.Bounds.Width + "×" + s.Bounds.Height}
@@ -140,7 +141,7 @@
             y={rect.y + 12}
             class={[
               "text-[8px] font-medium uppercase",
-              projecting ? "fill-neutral-content/60" : "fill-base-content/60",
+              projecting ? "fill-secondary-content/60" : "fill-base-content/60",
             ]}
           >
             primary
@@ -151,7 +152,7 @@
             x={rect.x + rect.w - 6}
             y={rect.y + 12}
             text-anchor="end"
-            class="fill-secondary text-[8px] font-bold uppercase"
+            class="fill-primary text-[8px] font-bold uppercase"
           >
             здесь
           </text>
