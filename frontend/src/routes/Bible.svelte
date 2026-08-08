@@ -1,11 +1,14 @@
 <script lang="ts">
+  import type { VerseSearchHit } from "$lib/bindings/changeme";
   import { Book } from "$lib/bindings/changeme/backend/models/models";
   import { HideVerse, ShowVerse } from "$lib/bindings/changeme/dbhandler";
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
+  import SearchSelect from "$lib/components/SearchSelect.svelte";
   import Select from "$lib/components/Select.svelte";
   import VerseList from "$lib/components/VerseList.svelte";
   import { BibleStore } from "$lib/stores/BibleStore.svelte";
+  import { verseSearch } from "$lib/stores/searchStore.svelte";
 
   let translations = $derived(BibleStore.translations);
   let books = $derived(BibleStore.books);
@@ -14,6 +17,8 @@
   let history = $derived(BibleStore.history);
   let shown = $derived(verses.shown);
 
+  let searchField = $state<ReturnType<typeof SearchSelect> | null>(null);
+
   const showVerse = () => {
     const activeId = verses.active?.ID;
     if (activeId) {
@@ -21,8 +26,59 @@
     }
   };
 
+  /** Переход к найденному стиху: выбираем его в основном каскаде, чтобы
+   * дальше работали привычные стрелки и «Показать стих».
+   *
+   * Поиск после выбора сбрасывается — выдача своё дело сделала, а список
+   * стихов главы уже стоит на нужном месте. */
+  const selectHit = async (hit: VerseSearchHit) => {
+    verseSearch.clear();
+    await BibleStore.navigate.goTo(hit.Book, hit.Chapter, hit.ID);
+  };
+
+  const goToReference = async () => {
+    const reference = verseSearch.reference;
+    if (!reference) return;
+    verseSearch.clear();
+    await BibleStore.navigate.goTo(
+      reference.book,
+      reference.chapter,
+      reference.hasVerse ? reference.verse.ID : undefined,
+    );
+  };
+
+  /** Enter в строке поиска: перейти и сразу вывести на экран. Разобранная
+   * ссылка приоритетнее выдачи — набравший «Ин 3:16» хочет туда, а не в
+   * список совпадений. */
+  const submitSearch = async () => {
+    if (verseSearch.reference) {
+      await goToReference();
+      showVerse();
+      return;
+    }
+    const hit = verseSearch.active;
+    if (hit) {
+      await selectHit(hit);
+      showVerse();
+    }
+  };
+
   $effect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F / Ctrl+L — встать в строку поиска, не трогая мышь.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "l")) {
+        searchField?.focus();
+        e.preventDefault();
+        return;
+      }
+
+      // Пока курсор в поле ввода, навигация принадлежит полю: иначе стрелки
+      // листали бы главы прямо во время набора запроса.
+      const target = e.target as HTMLElement | null;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
       switch (e.code) {
         case "Escape":
           HideVerse();
@@ -99,7 +155,24 @@
   </div>
 
   <div class="flex w-0 flex-grow flex-col gap-2">
-    <div class="flex flex-col h-2/3 w-full gap-2">
+    <div class="flex flex-col h-2/3 w-full min-h-0 gap-2">
+      <SearchSelect
+        bind:this={searchField}
+        bind:query={verseSearch.query}
+        loading={verseSearch.loading}
+        placeholder="Поиск по тексту или ссылка — «Ин 3:16»"
+        items={verseSearch.results}
+        activeItem={verseSearch.active}
+        getText={(i) => i.text}
+        getMatches={(i) => i.matches}
+        getBadge={(i) => `${i.Book.shortName} ${i.Chapter.number}:${i.number}`}
+        onSelect={selectHit}
+        onNavigate={(d) => verseSearch.step(d)}
+        onSubmit={submitSearch}
+        referenceLabel={verseSearch.reference?.ref}
+        onReference={goToReference}
+      />
+
       <VerseList
         onClick={(i) => (verses.active = i)}
         onDoubleClick={(i) => {

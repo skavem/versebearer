@@ -5,6 +5,9 @@ bin
 go.sum
 
 test.db
+# Поисковый индекс Bleve — полностью производен от test.db, пересобирается
+# автоматически при первом запуске с пустым индексом.
+search.bleve
 
 .svelte-kit
 frontend/src/lib/bindings

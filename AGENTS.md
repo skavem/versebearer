@@ -14,6 +14,9 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 | `Taskfile.yml` | Top-level Task runner. Delegates to per-OS files under `build/` |
 | `go.mod` | Module name `changeme`. Wails v3 alpha, GORM + SQLite driver, r3labs/sse, godotenv |
 | `db_import.go` | Translation import/removal exposed to the UI: native file dialog picker, file inspection, transactional import, cascade delete, translation list for settings |
+| `db_search.go` | Wails-exposed full-text search over verses and couplets (`SearchVerses`, `SearchCouplets`, `RebuildSearchIndex`) plus the index-sync hooks called from song/import mutations |
+| `db_reference.go` | Reference parser: turns «Ин 3:16», «1 Кор. 13», «быт1:1» into a book/chapter/verse jump. Independent of the full-text index |
+| `search.bleve` | Bleve index directory (created at startup, ignored). Fully derived from `test.db` — safe to delete, rebuilds on next launch |
 | `translations/` | Distributable translation files for the in-app importer. **Only public-domain or freely licensed texts belong here** — currently Synodal, both Elizabethan editions (public domain) and the Open Bible (CC BY-SA 4.0). Copyrighted translations must not be committed: source sites publish them under a permission granted to that site alone. See README for the per-translation rights table |
 | `Bible.json` | Seed Synodal translation (books/chapters/verses) consumed by `backend/filler` |
 | `songs.json` | Seed song dump consumed by `backend/filler` (untracked, in `.gitignore`) |
@@ -50,8 +53,19 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 - `ReplaceCouplets(songId, []CoupletInput)` is the bulk-edit endpoint: atomically deletes all couplets for the song and re-inserts the supplied blocks with fresh `Number = i+1`. Hides the active shown couplet first if it belongs to the song (all IDs change, so the old ref can't survive). Emits `song_update` once at the end. `CoupletInput{Label, Text}` is the wire type — exported so Wails bindings produce a TS class.
 - Song CRUD: `CreateSong(number, title) *models.Song` — returns the created song so the UI can set it active without waiting for `songs_update`. `RemoveSong(songId)` — hides the active couplet first if it belongs to the deleted song, then cascades couplet delete + song delete + `songs_update` emit. No song-number renumber (numbers are free-form, not contiguous).
 
+### Full-text search (`backend/search`)
+- The index is **derived state**: everything in `search.bleve` can be rebuilt from SQLite. `openSearchIndex` (called from `main` *after* `dbHandler.app` is assigned, so progress events aren't swallowed) rebuilds in a goroutine whenever the index is empty. `RebuildSearchIndex` is also exposed to the UI.
+- **Russian morphology is done by symmetric expansion, not lemmatisation.** `gomorphy` has no lemma API — only `WordForms`, and it is *not* invariant to the input form: `WordForms("любовь")` misses "любви" while `WordForms("любви")` contains "любовь". So every word is expanded into the snowball stems of all its word forms, on **both** sides — at index time and at query time — and a match is a non-empty intersection. Any change that expands only one side silently breaks the most common words. See the package doc in `morph.go`.
+- Words outside the OpenCorpora dictionary (proper names, «рече», «глаголющий») degrade to plain stemming rather than disappearing. Suppletion across *derivation* («говорить»→«сказал», «верить»→«уверовал») and Church-Slavonic archaisms are **not** covered by design — that needs a synonym dictionary, which the project deliberately doesn't have.
+- Two fields per document: `morph` (expanded stems, the actual retrieval field) and `text` (normalised original, used only for the exact-word and exact-phrase boosts). Both are non-stored — result text is read back from SQLite by ID. Without those boosts ranking is visibly wrong: OpenCorpora puts participles in the verb's paradigm, so «возлюбил» ties with «возлюбленному».
+- Bleve analyzers register via **blank imports** (`analysis/analyzer/simple`, `.../keyword`). Dropping them fails at index *creation* with «no analyzer with name 'simple' registered».
+- `search.Match` offsets are in **runes, not bytes** — they cross into JS, which slices by UTF-16 units. All translation text is BMP, where rune == UTF-16 unit. Highlighting is computed in Go (`Highlight`) rather than by Bleve's highlighter, because the index holds stems and Bleve would highlight «возлюб» instead of the live word.
+- `Normalize` applies NFC before casefolding: the Open Bible stores «й»/«ё» decomposed (и + U+0306), and without it plain Russian queries miss visually identical text. Never normalise a whole text before computing offsets — NFC changes string length and shifts every following position.
+- **Any new couplet mutation must call the index hooks** (`indexCoupletSilent` / `unindexCoupletSilent` / `reindexSongSilent`), and any that deletes rows must collect the ids *before* deleting. The hooks are deliberately silent: a stale search row must never fail the operator's actual action.
+
 ### Testing Requirements
 - Go smoke tests live in `dbHandler_test.go` (in-memory SQLite, no Wails dependency thanks to `emit` nil-safety). Run via `task test` (alias for `go test ./...`). Cover: `GetTranslations` preload depth, `CreateCouplet` song-scoped renumber, `RemoveCouplet` 1..n renumber.
+- Search tests live in `backend/search/search_test.go` (temp-dir Bleve index, no SQLite). They pin the behaviours that are easy to break silently: symmetric expansion on «любовь»/«любви» and «человек»/«людей», rune-based highlight offsets, exact-form ranking, translation/kind filtering, layout and typo fallbacks. `TestArchaicFormsAreNotLinked` records a known limitation rather than a bug.
 - Manual UI: `wails3 dev` or `task dev` and exercise the three tabs + projector.
 - Frontend type-check: `cd frontend && npm run check`.
 - Reciever type-check: `cd reciever && npm run check`.
@@ -66,6 +80,9 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 ### External (Go)
 - `github.com/wailsapp/wails/v3` v3.0.0-alpha.95 — desktop shell. Requires Go toolchain ≥ 1.25 (auto-fetched via `go.mod` toolchain directive).
 - `gorm.io/gorm` + `gorm.io/driver/sqlite` — ORM + SQLite (uses `mattn/go-sqlite3` CGO driver)
+- `github.com/blevesearch/bleve/v2` — pure-Go full-text index (BM25). No CGO, no build tags — unlike SQLite FTS5, which would have needed `-tags sqlite_fts5` in every per-OS Taskfile
+- `github.com/jus1d/gomorphy` — Russian morphology, OpenCorpora dictionary embedded at compile time (~8.8 MB of the binary)
+- `github.com/kljensen/snowball` — Russian stemmer, applied on top of the word forms
 - `github.com/r3labs/sse/v2` — SSE server for reciever
 - `github.com/joho/godotenv` — `.env` loader
 

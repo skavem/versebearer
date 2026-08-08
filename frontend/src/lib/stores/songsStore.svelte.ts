@@ -166,12 +166,37 @@ const createSongsStore = () => {
     },
   };
 
+  /**
+   * Переход к конкретному куплету конкретной песни — по строке из выдачи
+   * поиска.
+   *
+   * Через `songs.active` этого не сделать: его сеттер сам подгружает куплеты и
+   * ставит активным первый, поэтому найденный куплет тут же терялся бы. Здесь
+   * загрузка дожидается и выбор ставится осознанно.
+   */
+  const navigate = {
+    async goToCouplet(songId: number, coupletId: number) {
+      const song = songsList.find((s) => s.ID === songId);
+      if (!song) return;
+
+      activeSong = song;
+      coupletsLoading = true;
+      coupletsList = await GetCouplets(songId);
+      activeCouplet =
+        coupletsList.find((c) => c.ID === coupletId) ??
+        coupletsList.at(0) ??
+        null;
+      coupletsLoading = false;
+    },
+  };
+
   let qr = $state(false);
 
   return {
     songs,
     couplets,
     favorites,
+    navigate,
     get qr() {
       return qr;
     },

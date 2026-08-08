@@ -51,10 +51,16 @@ func (g *DbHandler) RemoveSong(songId int) {
 		g.hideCoupletInternal()
 	}
 
+	// Идентификаторы нужны поисковому индексу, а после удаления взять их
+	// будет негде — собираем заранее.
+	var coupletIds []uint
+	inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &coupletIds)
+
 	if err := inits.DB.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
 		log.Println("Error deleting couplets for song", err.Error())
 		return
 	}
+	g.unindexCoupletsSilent(coupletIds)
 
 	if err := inits.DB.Delete(&models.Song{}, songId).Error; err != nil {
 		log.Println("Error deleting song", err.Error())
@@ -135,6 +141,7 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 	if err := inits.DB.Create(&couplet).Error; err != nil {
 		log.Println("Error creating couplet", err.Error())
 	}
+	g.indexCoupletSilent(couplet)
 
 	g.reloadAndEmitSong(songId)
 }
@@ -155,6 +162,7 @@ func (g *DbHandler) UpdateCouplet(coupletId int, label string, text string, numb
 		log.Println("Error updating couplet", err.Error())
 		return
 	}
+	g.indexCoupletSilent(*couplet)
 
 	g.reloadAndEmitSong(couplet.SongId)
 }
@@ -169,6 +177,12 @@ func (g *DbHandler) ReplaceCouplets(songId int, blocks []CoupletInput) {
 	if g.coupletB.state != nil && g.coupletB.state.Song.ID == uint(songId) {
 		g.hideCoupletInternal()
 	}
+
+	// Замена блоков пересоздаёт куплеты с новыми идентификаторами, поэтому
+	// старые документы надо убрать из индекса адресно — по списку, снятому до
+	// транзакции.
+	var oldIds []uint
+	inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &oldIds)
 
 	err := inits.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
@@ -191,6 +205,8 @@ func (g *DbHandler) ReplaceCouplets(songId int, blocks []CoupletInput) {
 		log.Println("Error replacing couplets", err.Error())
 		return
 	}
+	g.unindexCoupletsSilent(oldIds)
+	g.reindexSongSilent(uint(songId))
 
 	g.reloadAndEmitSong(uint(songId))
 }
@@ -206,6 +222,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 		log.Println("Error deleting couplet", err.Error())
 		return
 	}
+	g.unindexCoupletSilent(uint(coupletId))
 
 	song := models.Song{}
 	if err := inits.DB.Preload("Couplets", addAscByNumber).Find(&song, couplet.SongId).Error; err != nil {

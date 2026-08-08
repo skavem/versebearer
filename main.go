@@ -51,6 +51,13 @@ func main() {
 
 	dbHandler.app = app
 
+	// Индекс открывается после присваивания app: первичная сборка идёт в
+	// горутине и рапортует о прогрессе событиями, а до этой строки emit
+	// молча их глотает.
+	if err := dbHandler.openSearchIndex(); err != nil {
+		log.Println("Error opening search index", err.Error())
+	}
+
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      mainWindowName,
 		Title:     "VerseBearer",

@@ -3,6 +3,7 @@ package main
 import (
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/search"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"gorm.io/gorm"
 	"sync"
@@ -122,6 +123,17 @@ type DbHandler struct {
 	styleB chan *StyleEvent
 
 	app *application.App
+
+	// searchIdx — полнотекстовый индекс стихов и куплетов (см. db_search.go).
+	// Полностью производен от SQLite: пересобирается при пустом индексе на
+	// старте, дальше поддерживается точечными хуками из мутаций куплетов и
+	// импорта переводов. nil, если индекс не удалось открыть — тогда поиск
+	// молча возвращает пустоту, а остальная программа работает как прежде.
+	searchIdx *search.Index
+
+	// rebuildMu не даёт запустить две полные пересборки индекса разом
+	// (см. RebuildSearchIndex).
+	rebuildMu sync.Mutex
 
 	// winSaveTimers debounces WinX/WinY/WinWidth/WinHeight persistence for
 	// window-mode outputs (see watchWindowGeometry) — one timer per output id,

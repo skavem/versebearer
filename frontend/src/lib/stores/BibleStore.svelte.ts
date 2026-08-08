@@ -240,6 +240,26 @@ const createBibleStore = () => {
     },
   };
 
+  /**
+   * Прямой переход к месту — по разобранной ссылке («Ин 3:16») или по строке
+   * выдачи поиска.
+   *
+   * Каскад книга→глава→стих проходится здесь целиком и последовательно, а не
+   * через сеттеры `books.active` / `chapters.active`: те грузят детей сами и
+   * сбрасывают выбор на первый элемент, так что заданный стих потерялся бы
+   * между двумя асинхронными загрузками.
+   */
+  const navigate = {
+    async goTo(book: Book, chapter: Chapter, verseId?: number) {
+      activeBook = book;
+      chaptersList = await GetChapters(book.ID);
+      activeChapter = chapter;
+      versesList = await GetVerses(chapter.ID);
+      activeVerse =
+        versesList.find((v) => v.ID === verseId) ?? versesList.at(0) ?? null;
+    },
+  };
+
   return {
     translations,
 
@@ -250,6 +270,8 @@ const createBibleStore = () => {
     verses,
 
     history,
+
+    navigate,
   };
 };
 

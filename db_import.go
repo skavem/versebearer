@@ -244,6 +244,12 @@ func (g *DbHandler) ImportTranslation(name, shortName string, data []byte) *Impo
 		file.Name, result.Books, result.Chapters, result.Verses)
 
 	g.emit("translations_update", nil)
+
+	// Индексация ~6 секунд на перевод — в фоне, чтобы диалог импорта закрылся
+	// сразу после записи в базу. До её окончания перевод просто не находится
+	// поиском, всё остальное с ним уже работает.
+	go g.indexTranslationSilent(translation.ID)
+
 	return result
 }
 
@@ -389,6 +395,10 @@ func (g *DbHandler) RemoveTranslation(idF float32) string {
 		g.hideVerseInternal()
 	}
 
+	// Список стихов снимается до удаления: индекс чистится по идентификаторам,
+	// а после каскада их уже не восстановить.
+	verseIds := verseIdsOfTranslation(id)
+
 	tx := inits.DB.Begin()
 	if tx.Error != nil {
 		return "не удалось начать удаление: " + tx.Error.Error()
@@ -420,5 +430,6 @@ func (g *DbHandler) RemoveTranslation(idF float32) string {
 
 	log.Printf("RemoveTranslation: удалён «%s»", translation.Name)
 	g.emit("translations_update", nil)
+	go g.unindexVersesSilent(verseIds)
 	return ""
 }
