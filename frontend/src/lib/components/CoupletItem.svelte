@@ -4,6 +4,7 @@
 
   let {
     isActive,
+    isShown,
     onclick,
     ondblclick,
     item,
@@ -14,6 +15,7 @@
     oncontextmenu,
   }: {
     isActive: boolean;
+    isShown: boolean;
     onclick: MouseEventHandler<HTMLDivElement> | null;
     ondblclick: MouseEventHandler<HTMLDivElement> | null;
     item: T;
@@ -41,7 +43,13 @@
     "group/item flex cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
     {
       "border-transparent": !isActive,
-      "border-neutral bg-neutral/5": isActive,
+      // primary, а не neutral: в тёмной теме neutral — это почти цвет фона,
+      // рамка выделения пропадала. primary читается в обеих темах.
+      "border-primary": isActive,
+      // Заливки взаимоисключающие: у двух bg-* одного веса порядок решает CSS,
+      // а не эта строка, поэтому янтарь «в эфире» задаётся явным приоритетом.
+      "bg-primary/10": isActive && !isShown,
+      "bg-secondary/20": isShown,
     },
   ]}
   {onclick}

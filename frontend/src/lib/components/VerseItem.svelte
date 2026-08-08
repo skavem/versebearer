@@ -33,8 +33,13 @@
   class={[
     "group/item flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
     !isActive && "border-transparent",
-    isActive && "border-neutral bg-neutral/5",
-    isShown && "bg-secondary/10",
+    // primary, а не neutral: в тёмной теме neutral — это почти цвет фона,
+    // рамка выделения пропадала. primary читается в обеих темах.
+    isActive && "border-primary",
+    // Заливки взаимоисключающие: у двух bg-* одного веса порядок решает CSS,
+    // а не эта строка, поэтому янтарь «в эфире» задаётся явным приоритетом.
+    isActive && !isShown && "bg-primary/10",
+    isShown && "bg-secondary/20",
   ]}
   {onclick}
   {ondblclick}

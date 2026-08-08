@@ -43,7 +43,9 @@
     class={[
       "group/item absolute flex w-full cursor-pointer flex-row items-center justify-between gap-2 rounded border-2 p-2 transition-colors hover:bg-base-200",
       !isActive && "border-transparent",
-      isActive && "border-neutral bg-neutral/5",
+      // primary, а не neutral: в тёмной теме neutral — это почти цвет фона,
+      // рамка выделения пропадала. primary читается в обеих темах.
+      isActive && "border-primary bg-primary/10",
     ]}
     {onclick}
     {ondblclick}
