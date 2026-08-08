@@ -57,6 +57,16 @@ func main() {
 	if err := dbHandler.openSearchIndex(); err != nil {
 		log.Println("Error opening search index", err.Error())
 	}
+	// Bleve держит сегменты и файловый замок: без закрытия каждый выход
+	// оставляет индекс грязным.
+	defer func() {
+		if dbHandler.searchIdx == nil {
+			return
+		}
+		if err := dbHandler.searchIdx.Close(); err != nil {
+			log.Println("Error closing search index", err.Error())
+		}
+	}()
 
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      mainWindowName,
@@ -110,8 +120,9 @@ func main() {
 		}
 	})
 
-	err := app.Run()
-	if err != nil {
-		log.Fatal(err)
+	// Не log.Fatal: он завершает процесс через os.Exit, а тогда отложенное
+	// закрытие поискового индекса не выполнится.
+	if err := app.Run(); err != nil {
+		log.Println("Application stopped with error", err.Error())
 	}
 }

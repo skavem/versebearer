@@ -10,6 +10,7 @@ import (
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/search"
 )
 
 // TranslationFileBook is one book inside an import file: a short name, a full
@@ -430,6 +431,6 @@ func (g *DbHandler) RemoveTranslation(idF float32) string {
 
 	log.Printf("RemoveTranslation: удалён «%s»", translation.Name)
 	g.emit("translations_update", nil)
-	go g.unindexVersesSilent(verseIds)
+	go g.unindexSilent(search.KindVerse, verseIds...)
 	return ""
 }

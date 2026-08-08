@@ -3,6 +3,7 @@ package main
 import (
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/search"
 	"gorm.io/gorm"
 	"log"
 )
@@ -52,15 +53,19 @@ func (g *DbHandler) RemoveSong(songId int) {
 	}
 
 	// Идентификаторы нужны поисковому индексу, а после удаления взять их
-	// будет негде — собираем заранее.
+	// будет негде — собираем заранее. Ошибка здесь означала бы пустой список и
+	// документы, зависшие в индексе до ручной пересборки, поэтому не удаляем.
 	var coupletIds []uint
-	inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &coupletIds)
+	if err := inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &coupletIds).Error; err != nil {
+		log.Println("Error collecting couplet ids", err.Error())
+		return
+	}
 
 	if err := inits.DB.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
 		log.Println("Error deleting couplets for song", err.Error())
 		return
 	}
-	g.unindexCoupletsSilent(coupletIds)
+	g.unindexSilent(search.KindCouplet, coupletIds...)
 
 	if err := inits.DB.Delete(&models.Song{}, songId).Error; err != nil {
 		log.Println("Error deleting song", err.Error())
@@ -138,8 +143,13 @@ func (g *DbHandler) CreateCouplet(text, label string, number, songId uint) {
 		return
 	}
 
+	// Выходим при ошибке: без этого дальше индексировался бы куплет с нулевым
+	// идентификатором — документ «couplet:0» с настоящим текстом, который потом
+	// находится поиском, занимает место в выдаче и молча отбрасывается при
+	// сборке результата. Убрать его может только полная пересборка индекса.
 	if err := inits.DB.Create(&couplet).Error; err != nil {
 		log.Println("Error creating couplet", err.Error())
+		return
 	}
 	g.indexCoupletSilent(couplet)
 
@@ -180,9 +190,14 @@ func (g *DbHandler) ReplaceCouplets(songId int, blocks []CoupletInput) {
 
 	// Замена блоков пересоздаёт куплеты с новыми идентификаторами, поэтому
 	// старые документы надо убрать из индекса адресно — по списку, снятому до
-	// транзакции.
+	// транзакции. Порядок «сначала снять список, потом удалять» безопасен ещё и
+	// потому, что удаление здесь мягкое (gorm.Model): строки остаются, номера не
+	// переиспользуются и новый куплет не может получить идентификатор старого.
 	var oldIds []uint
-	inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &oldIds)
+	if err := inits.DB.Model(&models.Couplet{}).Where("song_id = ?", songId).Pluck("id", &oldIds).Error; err != nil {
+		log.Println("Error collecting couplet ids", err.Error())
+		return
+	}
 
 	err := inits.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("song_id = ?", songId).Delete(&models.Couplet{}).Error; err != nil {
@@ -205,7 +220,7 @@ func (g *DbHandler) ReplaceCouplets(songId int, blocks []CoupletInput) {
 		log.Println("Error replacing couplets", err.Error())
 		return
 	}
-	g.unindexCoupletsSilent(oldIds)
+	g.unindexSilent(search.KindCouplet, oldIds...)
 	g.reindexSongSilent(uint(songId))
 
 	g.reloadAndEmitSong(uint(songId))
@@ -222,7 +237,7 @@ func (g *DbHandler) RemoveCouplet(coupletId int) {
 		log.Println("Error deleting couplet", err.Error())
 		return
 	}
-	g.unindexCoupletSilent(uint(coupletId))
+	g.unindexSilent(search.KindCouplet, uint(coupletId))
 
 	song := models.Song{}
 	if err := inits.DB.Preload("Couplets", addAscByNumber).Find(&song, couplet.SongId).Error; err != nil {

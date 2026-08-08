@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 
 	"github.com/blevesearch/bleve/v2"
@@ -51,7 +52,14 @@ type Doc struct {
 // docID собирает ключ документа. Стихи и куплеты нумеруются независимо, так
 // что тип обязан входить в ключ.
 func docID(kind string, id uint) string {
-	return fmt.Sprintf("%s:%d", kind, id)
+	return kind + ":" + strconv.FormatUint(uint64(id), 10)
+}
+
+// translationTerm — как идентификатор перевода выглядит в индексе. Пишется в
+// fields, читается в buildQuery: разойдись эти две записи хоть на пробел,
+// фильтр по переводу молча перестал бы находить что-либо.
+func translationTerm(id uint) string {
+	return strconv.FormatUint(uint64(id), 10)
 }
 
 // Index — обёртка над Bleve. Все методы безопасны для конкурентного вызова:
@@ -169,6 +177,26 @@ func (i *Index) PutBatch(docs []Doc) error {
 	return i.idx.Batch(batch)
 }
 
+// DeleteBatch убирает пачку документов одного типа. Как и при записи, важно
+// именно пакетно: каждый одиночный Delete — отдельный коммит сегмента, а при
+// удалении перевода идентификаторов набирается больше тридцати тысяч, и
+// поштучное удаление занимает индекс и диск на минуты.
+func (i *Index) DeleteBatch(kind string, ids []uint) error {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	if i.idx == nil {
+		return errors.New("индекс закрыт")
+	}
+	batch := i.idx.NewBatch()
+	for _, id := range ids {
+		batch.Delete(docID(kind, id))
+	}
+	if batch.Size() == 0 {
+		return nil
+	}
+	return i.idx.Batch(batch)
+}
+
 // fields раскладывает документ по полям индекса. Расширение в стеммы (самая
 // дорогая часть, ~5 мкс на слово) происходит именно здесь.
 func fields(d Doc) map[string]any {
@@ -178,7 +206,7 @@ func fields(d Doc) map[string]any {
 		fieldText:  Normalize(d.Text),
 	}
 	if d.TranslationID != 0 {
-		f[fieldTranslation] = fmt.Sprintf("%d", d.TranslationID)
+		f[fieldTranslation] = translationTerm(d.TranslationID)
 	}
 	return f
 }

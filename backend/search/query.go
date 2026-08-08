@@ -40,6 +40,9 @@ const (
 	phraseBoost = 4.0
 )
 
+// maxLimit — потолок размера выдачи, см. Search.
+const maxLimit = 200
+
 // Search выполняет запрос. Возвращает попадания в порядке убывания оценки и
 // раскрытые термы запроса — они нужны вызывающему слою для подсветки, чтобы не
 // раскрывать запрос второй раз.
@@ -52,6 +55,12 @@ func (i *Index) Search(q string, o Opts) ([]Hit, [][]string, error) {
 
 	if o.Limit <= 0 {
 		o.Limit = 50
+	}
+	// Потолок: выдача уходит в SQLite одним `id IN (...)`, и слишком щедрый
+	// вызывающий заставил бы Bleve материализовать тысячи попаданий ради списка,
+	// который оператор всё равно не пролистает.
+	if o.Limit > maxLimit {
+		o.Limit = maxLimit
 	}
 
 	// Забытая раскладка проверяется раньше опечаток: «k.,jdm» даёт ноль
@@ -72,6 +81,11 @@ func (i *Index) Search(q string, o Opts) ([]Hit, [][]string, error) {
 
 	// Опечатка распознаётся по пустой выдаче: гонять нечёткий поиск всегда
 	// дорого и вредно — он размывает нормальные результаты.
+	//
+	// Термы при этом возвращаются исходные, не размытые, поэтому подсветка на
+	// таких результатах не сработает: в найденном тексте стоит другое слово, чем
+	// в запросе. Строка находится — это главное; закрасить в ней «не то» слово
+	// было бы хуже, чем не закрашивать ничего.
 	if o.Fuzzy && len(terms) > 0 {
 		hits, err = i.run(buildQuery(q, terms, o, true), o.Limit)
 		if err != nil {
@@ -102,7 +116,7 @@ func buildQuery(raw string, terms [][]string, o Opts, fuzzy bool) query.Query {
 	root.AddMust(kindQ)
 
 	if o.TranslationID != 0 {
-		trQ := bleve.NewTermQuery(strconv.FormatUint(uint64(o.TranslationID), 10))
+		trQ := bleve.NewTermQuery(translationTerm(o.TranslationID))
 		trQ.SetField(fieldTranslation)
 		root.AddMust(trQ)
 	}
