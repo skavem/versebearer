@@ -28,10 +28,14 @@
 </script>
 
 <div class="flex w-full flex-grow flex-col bg-base-100">
-  <div class="navbar bg-neutral text-white">
+  <!-- Белый цвет — на самих элементах шапки, а не на контейнере: модалка
+       настроек рендерится изнутри навбара и, хоть и выглядит отдельным слоем,
+       по дереву остаётся его потомком. Общий text-white наследовался внутрь и
+       делал нецветные надписи в настройках белыми на светлом фоне. -->
+  <div class="navbar bg-neutral">
     <div class="navbar-start">
       <button
-        class="btn btn-ghost text-lg"
+        class="btn btn-ghost text-lg text-white"
         onclick={() => (activeTabIndex = 0)}
       >
         VerseBearer
