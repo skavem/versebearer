@@ -17,6 +17,7 @@ function createIndexState() {
   let building = $state(false);
   let done = $state(0);
   let total = $state(0);
+  let error = $state("");
 
   Events.On(
     "search_index_progress",
@@ -24,15 +25,27 @@ function createIndexState() {
       building = data.done < data.total;
       done = data.done;
       total = data.total;
+      error = "";
     },
   );
   Events.On("search_index_ready", () => {
     building = false;
+    error = "";
+  });
+  // Обрыв сборки обязателен к обработке: прогресс считается по событиям, и без
+  // этого признака строка поиска навсегда осталась бы с «идёт индексация», а
+  // кнопка пересборки — заблокированной.
+  Events.On("search_index_failed", ({ data }: { data: string }) => {
+    building = false;
+    error = data || "не удалось собрать индекс";
   });
 
   return {
     get building() {
       return building;
+    },
+    get error() {
+      return error;
     },
     get done() {
       return done;
@@ -116,12 +129,12 @@ function createSearch<T>(run: (query: string) => Promise<T[]>) {
     set active(value: T | null) {
       active = value;
     },
-    /** Пустой ли запрос — по этому признаку интерфейс решает, показывать
-     * обычный список или выдачу поиска. */
-    get isEmpty() {
-      return query.trim().length === 0;
-    },
     clear() {
+      // Отложенный запрос надо снять, а не только обнулить состояние: при
+      // выборе строки Enter'ом внутри окна дебаунса он выстрелил бы уже после
+      // очистки, взял свежий номер (то есть счётчик устаревания его не поймал
+      // бы) и заново набил выдачу текстом, которого в поле уже нет.
+      debouncer.cancelAll();
       query = "";
       results = [];
       active = null;
@@ -166,9 +179,6 @@ function createVerseSearch() {
     set active(value) {
       base.active = value;
     },
-    get isEmpty() {
-      return base.isEmpty;
-    },
     step(delta: number) {
       base.step(delta);
     },
@@ -194,6 +204,9 @@ function createVerseSearch() {
       return reference;
     },
     clear() {
+      // Свой дебаунс — свой отзыв: у разбора ссылки отдельный таймер, и без
+      // этого он дорисовал бы строку перехода поверх уже очищенного поиска.
+      debouncer.cancelAll();
       base.clear();
       reference = null;
     },

@@ -7,6 +7,7 @@
   import SearchSelect from "$lib/components/SearchSelect.svelte";
   import Select from "$lib/components/Select.svelte";
   import VerseList from "$lib/components/VerseList.svelte";
+  import { isFromModal, isSearchShortcut, isTypingTarget } from "$lib/keyboard";
   import { BibleStore } from "$lib/stores/BibleStore.svelte";
   import { verseSearch } from "$lib/stores/searchStore.svelte";
 
@@ -65,21 +66,15 @@
 
   $effect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+F / Ctrl+L — встать в строку поиска, не трогая мышь.
-      // Сравниваем по code, а не по key: key отдаёт символ текущей раскладки,
-      // и на русской Ctrl+F приходит как «а» — сочетание не срабатывало.
-      if ((e.ctrlKey || e.metaKey) && (e.code === "KeyF" || e.code === "KeyL")) {
+      if (isFromModal(e)) return;
+
+      if (isSearchShortcut(e)) {
         searchField?.focus();
         e.preventDefault();
         return;
       }
 
-      // Пока курсор в поле ввода, навигация принадлежит полю: иначе стрелки
-      // листали бы главы прямо во время набора запроса.
-      const target = e.target as HTMLElement | null;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (isTypingTarget(e)) return;
 
       switch (e.code) {
         case "Escape":

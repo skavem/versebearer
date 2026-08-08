@@ -15,6 +15,7 @@
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import SearchSelect from "$lib/components/SearchSelect.svelte";
   import SongsSelect from "$lib/components/SongsSelect.svelte";
+  import { isFromModal, isSearchShortcut, isTypingTarget } from "$lib/keyboard";
   import { coupletSearch } from "$lib/stores/searchStore.svelte";
   import { songsStore } from "$lib/stores/songsStore.svelte";
 
@@ -31,19 +32,16 @@
    * дальше работали привычные стрелки и «Показать куплет». Поиск при этом
    * сбрасывается — список куплетов уже стоит на нужном месте. */
   const selectHit = async (hit: CoupletSearchHit) => {
-    const songId = hit.Song.ID;
-    const coupletId = hit.ID;
     coupletSearch.clear();
-    await songsStore.navigate.goToCouplet(songId, coupletId);
+    await songsStore.navigate.goToCouplet(hit.Song.ID, hit.ID);
   };
 
   /** Enter в строке поиска — перейти и сразу вывести на экран. */
   const submitSearch = async () => {
     const hit = coupletSearch.active;
     if (!hit) return;
-    const coupletId = hit.ID;
     await selectHit(hit);
-    ShowCouplet(coupletId);
+    ShowCouplet(hit.ID);
   };
 
   const confirmDelete = async () => {
@@ -66,23 +64,15 @@
 
   $effect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Сравниваем по code, а не по key: key отдаёт символ текущей раскладки,
-      // и на русской Ctrl+F приходит как «а» — сочетание не срабатывало.
-      if ((e.ctrlKey || e.metaKey) && (e.code === "KeyF" || e.code === "KeyL")) {
+      if (isFromModal(e)) return;
+
+      if (isSearchShortcut(e)) {
         searchField?.focus();
         e.preventDefault();
         return;
       }
 
-      // Пока курсор в поле ввода, навигация принадлежит полю — иначе стрелки
-      // листали бы куплеты прямо во время набора запроса.
-      const target = e.target as HTMLElement | null;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
+      if (isTypingTarget(e)) return;
 
       switch (e.code) {
         case "Escape":
@@ -193,7 +183,10 @@
         <button
           class={[
             "btn btn-square",
-            songsStore.qr ? "btn-secondary" : "btn-outline btn-secondary",
+            // Янтарь только во включённом состоянии: выключенный QR тоже был
+            // янтарным, и рядом с соседней кнопкой, где янтарь означает «в
+            // эфире», один цвет читался в двух противоположных смыслах.
+            songsStore.qr ? "btn-secondary" : "btn-outline",
           ]}
           onclick={() => {
             songsStore.qr = !songsStore.qr;

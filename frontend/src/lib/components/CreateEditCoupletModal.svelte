@@ -81,15 +81,15 @@
             }}
           />
           <button
-            class="btn btn-outline btn-secondary"
+            class="btn btn-outline"
             onclick={() => (label = "Куплет")}>Куплет</button
           >
           <button
-            class="btn btn-outline btn-secondary"
+            class="btn btn-outline"
             onclick={() => (label = "Припев")}>Припев</button
           >
           <button
-            class="btn btn-outline btn-secondary"
+            class="btn btn-outline"
             onclick={() => (label = "Бридж")}>Бридж</button
           >
         </div>

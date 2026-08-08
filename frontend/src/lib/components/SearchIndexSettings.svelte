@@ -47,9 +47,11 @@
     {/if}
   </button>
 
-  {#if error}
+  <!-- Два источника ошибки: отказ самого вызова и обрыв уже начатой сборки,
+       о котором бэкенд сообщает событием. -->
+  {#if error || searchIndex.error}
     <div class="label py-1">
-      <span class="label-text-alt text-error">{error}</span>
+      <span class="label-text-alt text-error">{error || searchIndex.error}</span>
     </div>
   {/if}
 </div>
