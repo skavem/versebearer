@@ -95,21 +95,44 @@ func matchBook(raw string, books []models.Book) *models.Book {
 		candidates = append(candidates, normalizeBookName(search.FixLayout(raw)))
 	}
 
-	for _, needle := range candidates {
-		for _, matches := range []func(b models.Book) bool{
-			func(b models.Book) bool { return normalizeBookName(b.ShortName) == needle },
-			func(b models.Book) bool { return normalizeBookName(b.Title) == needle },
-			func(b models.Book) bool { return strings.HasPrefix(normalizeBookName(b.ShortName), needle) },
-			func(b models.Book) bool { return strings.HasPrefix(normalizeBookName(b.Title), needle) },
-		} {
-			for i := range books {
-				if matches(books[i]) {
-					return &books[i]
-				}
+	// Названия нормализуются по одному разу: раньше каждая книга проходила через
+	// normalizeBookName на каждом уровне приоритета, то есть вчетверо чаще.
+	type names struct{ short, title string }
+	normalized := make([]names, len(books))
+	for i, b := range books {
+		normalized[i] = names{normalizeBookName(b.ShortName), normalizeBookName(b.Title)}
+	}
+
+	for _, candidate := range candidates {
+		best, bestRank := -1, 0
+		for i, n := range normalized {
+			rank := bookRank(n.short, n.title, candidate)
+			// Строго лучше: при равном приоритете побеждает книга, идущая
+			// раньше по порядку, — как и в прежнем последовательном переборе.
+			if rank != 0 && (bestRank == 0 || rank < bestRank) {
+				best, bestRank = i, rank
 			}
+		}
+		if best >= 0 {
+			return &books[best]
 		}
 	}
 	return nil
+}
+
+// bookRank — насколько уверенно название совпало: 1 самое надёжное, 0 — мимо.
+func bookRank(short, title, needle string) int {
+	switch {
+	case short == needle:
+		return 1
+	case title == needle:
+		return 2
+	case strings.HasPrefix(short, needle):
+		return 3
+	case strings.HasPrefix(title, needle):
+		return 4
+	}
+	return 0
 }
 
 // normalizeBookName убирает всё, что оператор может набрать или пропустить не
