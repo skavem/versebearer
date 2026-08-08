@@ -173,7 +173,10 @@
         <button
           class={[
             "btn btn-wide",
-            shown ? "btn-outline btn-error" : "btn-neutral",
+            // Янтарь = «в эфире», как метка показанного куплета в списке.
+            // Красный в палитре означает разрушительное действие, а скрыть
+            // куплет — не разрушительно.
+            shown ? "btn-outline btn-secondary" : "btn-neutral",
           ]}
           onclick={() => {
             if (!shown) {

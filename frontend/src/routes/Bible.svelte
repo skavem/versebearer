@@ -188,7 +188,10 @@
         <button
           class={[
             "btn btn-wide",
-            shown ? "btn-outline btn-error" : "btn-neutral",
+            // Янтарь = «в эфире», как метка показанного стиха в списке.
+            // Красный в палитре означает разрушительное действие, а скрыть
+            // стих — не разрушительно.
+            shown ? "btn-outline btn-secondary" : "btn-neutral",
           ]}
           onclick={() => {
             if (shown) {
