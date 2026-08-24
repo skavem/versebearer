@@ -51,18 +51,141 @@ const createBibleStore = () => {
   });
   // Импорт/удаление перевода в настройках — подхватываем новый список.
   Events.On("translations_update", () => {
-    BibleStore.translations.reload();
+    BibleStore.translations.reload().catch(console.error);
   });
+
+  // Каскад книга→глава→стих запускают сразу несколько источников: смена
+  // перевода, выбор книги, поиск, история. Токен поколения не даёт
+  // запоздавшему ответу затереть более свежий переход.
+  let cascadeGeneration = 0;
+  const startCascade = () => ++cascadeGeneration;
+  const isStale = (generation: number) => generation !== cascadeGeneration;
+
+  type Picker<T> = (items: T[]) => T | undefined;
+  // Чем выбрать главу и стих, если первый элемент списка не подходит.
+  type Picks = { chapter?: Picker<Chapter>; verse?: Picker<Verse> };
+
+  // Ближайший элемент с номером не больше запрошенного: в другом переводе глав
+  // или стихов бывает меньше. Списки приходят отсортированными по номеру.
+  const nearestByNumber = <T extends { number: number }>(
+    items: T[],
+    max?: number,
+  ) => (max === undefined ? undefined : items.findLast((i) => i.number <= max));
+
+  // Бэкенд отдаёт детей первого элемента вместе со списком — не тянем повторно.
+  const chaptersOf = async (book: Book) =>
+    book.chapters?.length ? book.chapters : await GetChapters(book.ID);
+  const versesOf = async (chapter: Chapter) =>
+    chapter.verses?.length ? chapter.verses : await GetVerses(chapter.ID);
+
+  const openChapter = async (
+    chapter: Chapter | null,
+    generation: number,
+    picks: Picks = {},
+  ) => {
+    if (isStale(generation)) return;
+    activeChapter = chapter;
+    versesLoading = true;
+    try {
+      const newVerses = chapter ? await versesOf(chapter) : [];
+      if (isStale(generation)) return;
+
+      versesList = newVerses;
+      activeVerse = picks.verse?.(newVerses) ?? newVerses.at(0) ?? null;
+    } catch (err) {
+      console.error(err);
+    } finally {
+      if (!isStale(generation)) versesLoading = false;
+    }
+  };
+
+  const openBook = async (
+    book: Book | null,
+    generation: number,
+    picks: Picks = {},
+  ) => {
+    if (isStale(generation)) return;
+    activeBook = book;
+    chaptersLoading = true;
+    versesLoading = true;
+    try {
+      const newChapters = book ? await chaptersOf(book) : [];
+      if (isStale(generation)) return;
+
+      chaptersList = newChapters;
+      chaptersLoading = false;
+      const chapter = picks.chapter?.(newChapters) ?? newChapters.at(0) ?? null;
+      await openChapter(chapter, generation, picks);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      if (!isStale(generation)) {
+        chaptersLoading = false;
+        versesLoading = false;
+      }
+    }
+  };
+
+  // «Быт» и «Быт.» — одна книга: точки, регистр и пробелы между файлами не
+  // согласованы.
+  const sameShortName = (a: string, b: string) =>
+    a.replaceAll(".", "").trim().toLowerCase() ===
+    b.replaceAll(".", "").trim().toLowerCase();
+
+  // Та же книга в другом переводе: сначала по сокращению, потом по номеру —
+  // сокращения расходятся между языками («Быт» / «Gen»), а номер это позиция
+  // книги в файле, и она совпадает у переводов одинакового состава.
+  const sameBook = (books: Book[], kept: Book) =>
+    books.find((b) => sameShortName(b.shortName, kept.shortName)) ??
+    books.find((b) => b.number === kept.number);
+
+  const openTranslation = async (translation: Translation | null) => {
+    // Позицию снимаем до загрузки: в новом переводе встаём на то же место.
+    const keptBook = activeBook;
+    const keptChapterNumber = activeChapter?.number;
+    const keptVerseNumber = activeVerse?.number;
+
+    activeTranslation = translation;
+    const generation = startCascade();
+
+    if (!translation) {
+      booksList = [];
+      booksLoading = false;
+      await openBook(null, generation);
+      return;
+    }
+
+    booksLoading = true;
+    try {
+      const newBooks = await GetBooks(translation.ID);
+      if (isStale(generation)) return;
+
+      booksList = newBooks;
+      booksLoading = false;
+
+      const book = keptBook ? sameBook(newBooks, keptBook) : undefined;
+      // Главу и стих восстанавливаем только внутри найденной книги — иначе их
+      // номера увели бы в случайное место чужой книги.
+      const picks: Picks = book
+        ? {
+            chapter: (cs) => nearestByNumber(cs, keptChapterNumber),
+            verse: (vs) => nearestByNumber(vs, keptVerseNumber),
+          }
+        : {};
+
+      await openBook(book ?? newBooks.at(0) ?? null, generation, picks);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      if (!isStale(generation)) booksLoading = false;
+    }
+  };
 
   const translations = {
     get loading() {
       return translationsLoading;
     },
-    /**
-     * Перечитывает список переводов после импорта/удаления в настройках.
-     * Активный перевод сохраняется, если он ещё существует, — иначе выбирается
-     * первый, и каскад книга→глава→стих перезагружается под него.
-     */
+    /** Перечитывает список после импорта/удаления перевода в настройках. */
     async reload() {
       const fresh = await GetTranslations();
       const keep = fresh.find((t) => t.ID === activeTranslation?.ID);
@@ -72,18 +195,7 @@ const createBibleStore = () => {
         activeTranslation = keep;
         return;
       }
-      const first = fresh.at(0) ?? null;
-      if (!first) {
-        activeTranslation = null;
-        booksList = [];
-        activeBook = null;
-        chaptersList = [];
-        activeChapter = null;
-        versesList = [];
-        activeVerse = null;
-        return;
-      }
-      translations.active = first;
+      translations.active = fresh.at(0) ?? null;
     },
     get list() {
       return translationsList;
@@ -91,39 +203,17 @@ const createBibleStore = () => {
     set list(val) {
       translationsList = val;
       translationsLoading = false;
-      activeTranslation = translationsList.at(0) || null;
+      activeTranslation = val.at(0) ?? null;
 
-      booksList = translationsList.at(0)?.books || [];
-      activeBook = booksList.at(0) || null;
-
-      chaptersList = booksList.at(0)?.chapters || [];
-      activeChapter = chaptersList.at(0) || null;
-
-      versesList = chaptersList.at(0)?.verses || [];
-      activeVerse = versesList.at(0) || null;
+      booksList = activeTranslation?.books ?? [];
+      booksLoading = false;
+      openBook(booksList.at(0) ?? null, startCascade());
     },
     get active() {
       return activeTranslation;
     },
     set active(val) {
-      activeTranslation = val;
-
-      booksLoading = true;
-      chaptersLoading = true;
-      versesLoading = true;
-      GetBooks(activeTranslation!.ID).then((newBooks) => {
-        booksList = newBooks;
-        activeBook = booksList.at(0) || null;
-        booksLoading = false;
-
-        chaptersList = booksList.at(0)?.chapters || [];
-        activeChapter = chaptersList.at(0) || null;
-        chaptersLoading = false;
-
-        versesList = chaptersList.at(0)?.verses || [];
-        activeVerse = versesList.at(0) || null;
-        versesLoading = false;
-      });
+      openTranslation(val);
     },
   };
 
@@ -138,19 +228,7 @@ const createBibleStore = () => {
       return activeBook;
     },
     set active(val) {
-      activeBook = val;
-
-      chaptersLoading = true;
-      versesLoading = true;
-      GetChapters(activeBook!.ID).then((newChapters) => {
-        chaptersList = newChapters;
-        activeChapter = chaptersList.at(0) || null;
-        chaptersLoading = false;
-
-        versesList = chaptersList.at(0)?.verses || [];
-        activeVerse = versesList.at(0) || null;
-        versesLoading = false;
-      });
+      openBook(val, startCascade());
     },
   };
 
@@ -165,14 +243,7 @@ const createBibleStore = () => {
       return activeChapter;
     },
     set active(val) {
-      activeChapter = val;
-
-      versesLoading = true;
-      GetVerses(activeChapter!.ID).then((newVerses) => {
-        versesList = newVerses;
-        activeVerse = versesList.at(0) || null;
-        versesLoading = false;
-      });
+      openChapter(val, startCascade());
     },
 
     next() {
@@ -220,6 +291,19 @@ const createBibleStore = () => {
     },
   };
 
+  /**
+   * Прямой переход к месту — по разобранной ссылке («Ин 3:16»), по строке
+   * выдачи поиска или из истории показов.
+   */
+  const navigate = {
+    async goTo(book: Book, chapter: Chapter, verseId?: number) {
+      await openBook(book, startCascade(), {
+        chapter: (cs) => cs.find((c) => c.ID === chapter.ID),
+        verse: (vs) => vs.find((v) => v.ID === verseId),
+      });
+    },
+  };
+
   const history = {
     get list() {
       return historyVerses.toReversed();
@@ -232,47 +316,11 @@ const createBibleStore = () => {
     },
     async restore(v: ShownVerse) {
       activeHistoryVerse = v;
-      activeBook = v.Book;
-      chaptersList = await GetChapters(activeBook.ID);
-      activeChapter = v.Chapter;
-      versesList = await GetVerses(activeChapter.ID);
-      activeVerse = v;
+      await navigate.goTo(v.Book, v.Chapter, v.ID);
     },
   };
 
-  /**
-   * Прямой переход к месту — по разобранной ссылке («Ин 3:16») или по строке
-   * выдачи поиска.
-   *
-   * Каскад книга→глава→стих проходится здесь целиком и последовательно, а не
-   * через сеттеры `books.active` / `chapters.active`: те грузят детей сами и
-   * сбрасывают выбор на первый элемент, так что заданный стих потерялся бы
-   * между двумя асинхронными загрузками.
-   */
-  const navigate = {
-    async goTo(book: Book, chapter: Chapter, verseId?: number) {
-      activeBook = book;
-      chaptersList = await GetChapters(book.ID);
-      activeChapter = chapter;
-      versesList = await GetVerses(chapter.ID);
-      activeVerse =
-        versesList.find((v) => v.ID === verseId) ?? versesList.at(0) ?? null;
-    },
-  };
-
-  return {
-    translations,
-
-    books,
-
-    chapters,
-
-    verses,
-
-    history,
-
-    navigate,
-  };
+  return { translations, books, chapters, verses, history, navigate };
 };
 
 GetTranslations()
