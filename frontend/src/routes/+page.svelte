@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Audio from "./Audio.svelte";
   import Bible from "./Bible.svelte";
   import Screens from "./Screens.svelte";
   import Songs from "./Songs.svelte";
@@ -21,6 +22,10 @@
     {
       name: "Визуал",
       component: Visual,
+    },
+    {
+      name: "Звук",
+      component: Audio,
     },
   ];
   let activeTabIndex = $state(1);
