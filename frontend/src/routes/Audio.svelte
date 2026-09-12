@@ -3,8 +3,10 @@
   import AudioDeviceSelect from "$lib/components/AudioDeviceSelect.svelte";
   import EditTrackModal from "$lib/components/EditTrackModal.svelte";
   import List from "$lib/components/List.svelte";
+  import MiniPlayer from "$lib/components/MiniPlayer.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import PlaylistPanel from "$lib/components/PlaylistPanel.svelte";
+  import { isFromModal, isTypingTarget } from "$lib/keyboard";
   import { audioStore } from "$lib/stores/audioStore.svelte";
 
   const tracks = $derived(audioStore.tracks);
@@ -17,6 +19,112 @@
   // (этап 4) — устройство вывода и ошибка общие для обеих, поэтому живут в
   // шапке выше переключателя, а не дублируются в каждой подвкладке.
   let subView = $state<"library" | "playlists">("library");
+
+  // selectedPlaylistItemId — клавиатурный выбор строки плейлиста (план,
+  // этап 6). Живёт здесь, а не в PlaylistPanel: клавиши разбираются в общем
+  // document-level обработчике вкладки, ему нужен прямой доступ к значению.
+  let selectedPlaylistItemId = $state<number | null>(null);
+  $effect(() => {
+    audioStore.playlists.active?.ID; // сброс выбора при смене плейлиста
+    selectedPlaylistItemId = null;
+  });
+
+  function movePlaylistSelection(delta: number) {
+    const playlist = audioStore.playlists.active;
+    const items = playlist?.items ?? [];
+    if (!playlist || items.length === 0) return;
+    const idx = items.findIndex((i) => i.ID === selectedPlaylistItemId);
+    const next =
+      idx === -1
+        ? delta > 0
+          ? 0
+          : items.length - 1
+        : Math.min(items.length - 1, Math.max(0, idx + delta));
+    selectedPlaylistItemId = items[next].ID;
+  }
+
+  function playSelectedPlaylistItem() {
+    const playlist = audioStore.playlists.active;
+    const item = (playlist?.items ?? []).find(
+      (i) => i.ID === selectedPlaylistItemId,
+    );
+    if (!playlist || !item) return;
+    audioStore.play(playlist.ID, item.ID);
+  }
+
+  function seekRelative(deltaMs: number) {
+    const state = audioStore.player.state;
+    if (!state || state.status === "idle") return;
+    const next = Math.max(
+      0,
+      Math.min(state.durationMs, state.positionMs + deltaMs),
+    );
+    audioStore.seek(next);
+  }
+
+  function volumeStep(delta: number) {
+    const current = audioStore.player.state?.volume ?? 1;
+    audioStore.setVolume(Math.max(0, Math.min(1, current + delta)));
+  }
+
+  // Свой document-level обработчик, как Songs.svelte:65-98 — вкладки
+  // взаимоисключающие (+page.svelte монтирует ровно одну), второго
+  // постоянного слушателя не возникает, поэтому централизованный реестр не
+  // нужен (план, этап 6). Разбор по e.code, не по e.key — на русской
+  // раскладке key отдаёт символ раскладки (см. keyboard.ts).
+  $effect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isFromModal(e)) return;
+      // Ползунки прогресса/громкости в MiniPlayer — это <input type=range>,
+      // т.е. HTMLInputElement: isTypingTarget их тоже глушит. Они сами
+      // делают blur() после change (см. MiniPlayer.svelte), так что этот
+      // return не застревает на них дольше одного отпускания мыши.
+      if (isTypingTarget(e)) return;
+
+      switch (e.code) {
+        case "ArrowUp":
+          if (subView === "playlists") movePlaylistSelection(-1);
+          e.preventDefault();
+          return;
+        case "ArrowDown":
+          if (subView === "playlists") movePlaylistSelection(1);
+          e.preventDefault();
+          return;
+        case "Enter":
+          playSelectedPlaylistItem();
+          e.preventDefault();
+          return;
+        case "Escape":
+          audioStore.fadeOutStop();
+          e.preventDefault();
+          return;
+        case "Space":
+          audioStore.toggle();
+          e.preventDefault(); // иначе Space заодно прокрутит список
+          return;
+        case "ArrowLeft":
+          seekRelative(-5000);
+          e.preventDefault();
+          return;
+        case "ArrowRight":
+          seekRelative(5000);
+          e.preventDefault();
+          return;
+        case "Equal":
+        case "NumpadAdd":
+          volumeStep(0.05);
+          e.preventDefault();
+          return;
+        case "Minus":
+        case "NumpadSubtract":
+          volumeStep(-0.05);
+          e.preventDefault();
+          return;
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
 
   // Устройства/плейлисты запрашиваются лениво, только пока открыта вкладка
   // «Звук» — не при module-init audioStore (см. комментарий там):
@@ -186,9 +294,11 @@
     </div>
   {:else}
     <div class="min-h-0 flex-1">
-      <PlaylistPanel />
+      <PlaylistPanel bind:selectedItemId={selectedPlaylistItemId} />
     </div>
   {/if}
+
+  <MiniPlayer />
 </div>
 
 <EditTrackModal bind:track={editingTrack} />

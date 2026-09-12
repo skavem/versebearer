@@ -7,6 +7,14 @@
   import MuiIcon from "./MuiIcon.svelte";
   import Select from "./Select.svelte";
 
+  // selectedItemId — подсветка для клавиатурной навигации вкладки «Звук»
+  // (план, этап 6: ArrowUp/ArrowDown ходят по списку плейлиста, Enter играет
+  // выбранный). Отдельно от isPlayingItem: выбор клавиатурой и то, что
+  // сейчас реально звучит, — разные вещи, поэтому и подсветки разные
+  // (синий = выбор, янтарь = в эфире).
+  let { selectedItemId = $bindable(null) }: { selectedItemId?: number | null } =
+    $props();
+
   const playlists = $derived(audioStore.playlists);
   const tracks = $derived(audioStore.tracks);
   const player = $derived(audioStore.player.state);
@@ -267,14 +275,22 @@
         {:else}
           <ul class="flex flex-col gap-1">
             {#each playlist.items ?? [] as item (item.ID)}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <li
                 class={[
                   "group/item flex items-center gap-2 rounded border-2 p-2",
+                  // Янтарь = «в эфире» (играющий трек), синий = клавиатурный
+                  // выбор — оператору не спутать «что звучит» с «на чём
+                  // сейчас стоит курсор».
                   isPlayingItem(item)
-                    ? "border-primary bg-primary/10"
-                    : "border-transparent hover:bg-base-200",
+                    ? "border-secondary bg-secondary/10"
+                    : selectedItemId === item.ID
+                      ? "border-primary bg-primary/5"
+                      : "border-transparent hover:bg-base-200",
                 ]}
                 draggable="true"
+                onclick={() => (selectedItemId = item.ID)}
                 ondragstart={() => onDragStart(item)}
                 ondragover={onDragOver}
                 ondrop={() => onDrop(playlist, item)}

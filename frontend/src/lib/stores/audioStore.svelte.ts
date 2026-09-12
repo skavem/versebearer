@@ -5,6 +5,7 @@ import type {
 import {
   AddToPlaylist,
   CreatePlaylist,
+  FadeOutStop,
   GetDeviceId,
   ImportTrack,
   ListDevices,
@@ -19,8 +20,10 @@ import {
   RemoveTrack,
   RenamePlaylist,
   ReorderPlaylist,
+  Seek,
   SetDevice,
   SetPlaylistFlags,
+  SetVolume,
   State,
   Stop,
   Toggle,
@@ -371,6 +374,35 @@ const createAudioStore = () => {
     async prev() {
       try {
         await Prev();
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    // fadeOutStop — «Стоп» мини-плеера (этап 6): единственная кнопка стопа,
+    // т.к. при инварианте «ровно один активный трек» (И5) «стоп всё»
+    // совпадает со «стоп с фейдом».
+    async fadeOutStop() {
+      try {
+        await FadeOutStop();
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    async seek(ms: number) {
+      try {
+        await Seek(ms);
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    // setVolume обновляет playerState.volume оптимистично, не дожидаясь
+    // следующего опроса (до 500 мс, см. startPolling): без этого слайдер
+    // громкости на каждый tick перескакивал бы обратно к устаревшему
+    // значению, пока опрос не подтвердит новое.
+    async setVolume(v: number) {
+      if (playerState) playerState = { ...playerState, volume: v };
+      try {
+        await SetVolume(v);
       } catch (e) {
         lastError = errorMessage(e);
       }

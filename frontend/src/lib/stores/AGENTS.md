@@ -4,7 +4,7 @@
 # stores
 
 ## Purpose
-Three rune-based factory stores backing the three tabs. Not Svelte stores — each `createXxxStore()` returns a plain object with getters/setters that mutate inner `$state` variables.
+Rune-based factory stores backing the tabs. Not Svelte stores — each `createXxxStore()` returns a plain object with getters/setters that mutate inner `$state` variables.
 
 ## Key Files
 | File | Description |
@@ -12,6 +12,7 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 | `BibleStore.svelte.ts` | Translation → Book → Chapter → Verse cascade. Side-effect on `set active` fetches next level. Subscribes to Wails `show_verse`/`hide_verse` events. Maintains a `history` (most recent first) of every shown verse |
 | `songsStore.svelte.ts` | Songs + couplets + favorites + QR. Subscribes to `show_couplet`/`hide_couplet`/`songs_update`/`song_update`. Favorites are local-only (no DB), keyed by random `localId` so the same song can be queued multiple times |
 | `outputStore.svelte.ts` | Persisted `Output` entities (`ListOutputs`/`CreateOutput`/etc.) + OS monitor list (`@wailsio/runtime` `Screens.GetAll()`, used only as a picklist for `SetOutputScreen`) + locally-tracked `activeOutputIds: number[]` of outputs with an open projector window |
+| `audioStore.svelte.ts` | Media library + playlists + player transport for the "Звук" tab, backed by the Go `AudioService`. Subscribes to `audio_tracks_update`/`audio_playlists_update`/`audio_track_changed`/`audio_stopped`/`audio_device_lost`/`audio_error` |
 | `cycle.ts` | `cycleIndex<T extends {ID: number}>(list, active, delta)` — shared helper for `next/prev` across chapters/verses/couplets. Returns `undefined` at bounds, no wrap-around |
 
 ## For AI Agents
@@ -28,6 +29,10 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 - `BibleStore.translations.reload()` re-reads `GetTranslations()` after an import or deletion in settings. It keeps the current `active` translation when it still exists; otherwise it re-runs the whole book→chapter→verse cascade against the first one (and clears everything when none are left). The `translations_update` subscription calls it — the settings UI never touches `BibleStore` itself.
 - `ReplaceCouplets` (whole-song bulk edit) hits the same `song_update` handler. Since every couplet ID changes, the `activeCouplet` ID won't be found in the new list and falls back to the first couplet — that's expected. The backend also calls `hideCouplet` before the wipe if the shown couplet belonged to the same song, so `shownCouplet` clears via the `hide_couplet` event.
 - `Events.On("show_verse", ({ data }: { data: ShownVerse }) => ...)` — Wails v3 `Event.Emit(name, single)` delivers `data` as the value itself (no array wrap). If backend emits multiple args (`Emit(name, a, b)`), `data` is `[a, b]`.
+- `audioStore` deliberately breaks from the module-init-fetch pattern the other stores use: only `tracks` loads at module init (`ListTracks()`). `ListDevices()` and `ListPlaylists()` are lazy, triggered by `refreshDevices()`/`refreshPlaylists()` from `Audio.svelte`'s own `$effect` — `ListDevices()` boots `malgo.InitContext` on the Go side, and that must not happen before the operator has actually opened the "Звук" tab (a machine with no sound card must still start cleanly). `startPolling()`/`stopPolling()` (also driven from that `$effect`) gate the 500ms `State()` poll the same way — it isn't free, so it doesn't run while the tab is closed.
+- `audioStore.player.state` is `PlayerState | null` only until the first poll resolves; after that it is never null again — the Go `State()` handler always returns a full snapshot (`status: "idle"` when nothing is loaded), it just doesn't hold a DB connection open. Treat `status === "idle"` as the empty state, not `player === null`.
+- `setVolume(v)` updates `playerState.volume` optimistically before the backend call resolves — without it, the mini-player's volume slider would visibly snap back to the stale value on every ~500ms poll tick while being dragged.
+- `PlayerState.peak` is a **read-and-reset** value (Go `atomic.Swap(0)` on every `State()` call) — two consecutive polls never report the same peak twice. The level meter's peak-hold decay (`MiniPlayer.svelte`) is a local `requestAnimationFrame` animation between polls, not a second, faster subscription channel.
 
 ### Common Patterns
 - Each store exposes sub-objects (`translations`, `books`, `chapters`, `verses`, `history` etc.) so consumers do `BibleStore.verses.next()` rather than `BibleStore.nextVerse()`.
@@ -39,6 +44,7 @@ Three rune-based factory stores backing the three tabs. Not Svelte stores — ea
 - `$lib/bindings/changeme/dbhandler` for backend calls.
 - `$lib/bindings/changeme/backend/models` for types.
 - `$lib/bindings/changeme` for `ShownVerse`/`ShownCouplet` aggregate types.
+- `$lib/bindings/changeme/audioservice` for `AudioService` calls (`audioStore`), `$lib/bindings/changeme/models` for `PlayerState`/`AudioDevice`/`TrackInput`/`PlaylistFlagsInput`.
 
 ### External
 - `@wailsio/runtime` `Events` (Bible/Songs) + `Screens` (Screens).

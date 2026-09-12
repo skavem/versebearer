@@ -16,6 +16,7 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 | `db_import.go` | Translation import/removal exposed to the UI: native file dialog picker, file inspection, transactional import, cascade delete, translation list for settings |
 | `db_search.go` | Wails-exposed full-text search over verses and couplets (`SearchVerses`, `SearchCouplets`, `RebuildSearchIndex`) plus the index-sync hooks called from song/import mutations |
 | `db_reference.go` | Reference parser: turns «Ин 3:16», «1 Кор. 13», «быт1:1» into a book/chapter/verse jump. Independent of the full-text index |
+| `audio_*.go` | `AudioService` — Wails service for the "Звук" tab (Фонограммы feature): media library import, a `beep`/`malgo`-based player engine, device selection, playlists with auto-advance/loop, trim/gain and fade-out. See the dedicated bullet below and `backend/models/AGENTS.md` for the three models it owns |
 | `search.bleve` | Bleve index directory (created at startup, ignored). Fully derived from `test.db` — safe to delete, rebuilds on next launch |
 | `translations/` | Distributable translation files for the in-app importer. **Only public-domain or freely licensed texts belong here** — currently Synodal, both Elizabethan editions (public domain) and the Open Bible (CC BY-SA 4.0). Copyrighted translations must not be committed: source sites publish them under a permission granted to that site alone. See README for the per-translation rights table |
 | `Bible.json` | Seed Synodal translation (books/chapters/verses) consumed by `backend/filler` |
@@ -53,6 +54,12 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 - `ReplaceCouplets(songId, []CoupletInput)` is the bulk-edit endpoint: atomically deletes all couplets for the song and re-inserts the supplied blocks with fresh `Number = i+1`. Hides the active shown couplet first if it belongs to the song (all IDs change, so the old ref can't survive). Emits `song_update` once at the end. `CoupletInput{Label, Text}` is the wire type — exported so Wails bindings produce a TS class.
 - Song CRUD: `CreateSong(number, title) *models.Song` — returns the created song so the UI can set it active without waiting for `songs_update`. `RemoveSong(songId)` — hides the active couplet first if it belongs to the deleted song, then cascades couplet delete + song delete + `songs_update` emit. No song-number renumber (numbers are free-form, not contiguous).
 
+### Audio subsystem ("Звук" tab, `audio_*.go`, `AudioService`)
+- `AudioService` is a second Wails service alongside `DbHandler` (both constructed and registered in `main.go`), not a method group bolted onto `DbHandler` — it owns its own player engine (`pl *player`, built on `github.com/gopxl/beep/v2` decoding + `github.com/gen2brain/malgo` output) instead of the GORM-only world `DbHandler` lives in. Full design/invariants are in `.omc/plans/audio-playlist-implementation.md` (concurrency rules И1–И6 at the top are load-bearing — read them before touching `audio_player.go`).
+- Events (`AudioService.emit`, same nil-safe wrapper pattern as `DbHandler.emit`): `audio_tracks_update` (full library, after any import/delete/edit), `audio_playlists_update` (full playlist list with items, after any playlist mutation), `audio_track_changed` (carries a full `PlayerState` — emitted on `Play()` and on auto-advance, so the frontend doesn't have to wait for the next poll tick), `audio_stopped` (nil payload — track ended or was stopped with nothing to auto-advance to), `audio_device_lost` (nil payload — output device disappeared out from under playback), `audio_error` (string — background failures that have no synchronous caller to report to: gain measurement, a failed post-import DB write, a broken auto-advance).
+- `PlayerState` (`State()`, polled from the frontend every 500ms while the "Звук" tab is open — see `frontend/src/lib/stores/AGENTS.md`) never touches the DB and never blocks on the audio device — only on the player's own mutex, held no longer than one audio buffer's worth of work. `Peak` is read-and-reset (`atomic.Swap(0)`): the same call cannot report one peak twice, which the frontend's level-meter peak-hold has to account for.
+- Imported files live under `paths.MediaDir`, named `<hash>.<ext>`; the DB row (`AudioTrack`) never stores the audio itself. A source format `beep` can't decode natively is converted to FLAC via an external `ffmpeg` process, looked up **next to the running executable** (`os.Executable()`'s directory, not `$PATH`) — see `build/AGENTS.md` for how it gets there (`fetch:ffmpeg` task, bundled into the Windows installer; not shipped on macOS/Linux).
+
 ### Dev mode (`Taskfile.yml` + `build/config.yml` + `frontend/vite.config.ts`)
 - `task dev` builds with **`DEV=true`** (set explicitly in `build/config.yml`), and that flag is what makes frontend hot-reload work at all. Without the `production` tag Wails compiles the dev branch of its assetserver, which reads `FRONTEND_DEVSERVER_URL` (set by `wails3 dev`) and reverse-proxies the frontend to vite. With the tag, that same function returns `""`, the window serves the `frontend/dist` embedded in the binary, and Svelte edits only appear after a Go rebuild. `DEV` defaults to `"false"` in the root `Taskfile.yml`, so every release path — `task build`, `task package` — is production unless someone asks otherwise. The same variable doubles as the app's own dev switch: `task dev` exports it so the receiver is served from `reciever/dist` on disk instead of the embedded copy.
 - **`CGO_ENABLED: 1` is load-bearing in every platform Taskfile.** The SQLite driver is a cgo wrapper; the upstream beta.5 templates default it to `0`, and adopting that verbatim would break the build. Watch for this whenever build assets are re-synced with upstream.
@@ -78,7 +85,8 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 ### Testing Requirements
 - Go smoke tests live in `dbHandler_test.go` (in-memory SQLite, no Wails dependency thanks to `emit` nil-safety). Run via `task test` (alias for `go test ./...`). Cover: `GetTranslations` preload depth, `CreateCouplet` song-scoped renumber, `RemoveCouplet` 1..n renumber.
 - Search tests live in `backend/search/search_test.go` (temp-dir Bleve index, no SQLite). They pin the behaviours that are easy to break silently: symmetric expansion on «любовь»/«любви» and «человек»/«людей», rune-based highlight offsets, exact-form ranking, translation/kind filtering, layout and typo fallbacks. `TestArchaicFormsAreNotLinked` records a known limitation rather than a bug.
-- Manual UI: `wails3 dev` or `task dev` and exercise the three tabs + projector.
+- Audio engine tests live in `audio_player_test.go` — the first concurrent subsystem in the project, so it and every other `go test` invocation here must run with `-race` (`go test -race ./...`), not just plain `go test`.
+- Manual UI: `wails3 dev` or `task dev` and exercise the five tabs (Библия, Песни, Экраны, Визуал, Звук) + projector.
 - Frontend type-check: `cd frontend && npm run check`.
 - Reciever type-check: `cd reciever && npm run check`.
 
@@ -97,6 +105,8 @@ Wails3 desktop app for showing Bible verses and Christian song couplets on exter
 - `github.com/kljensen/snowball` — Russian stemmer, applied on top of the word forms
 - `github.com/r3labs/sse/v2` — SSE server for reciever
 - `github.com/joho/godotenv` — `.env` loader
+- `github.com/gopxl/beep/v2` — audio decode/DSP pipeline (resampling, gain, fade transitions) for the "Звук" tab
+- `github.com/gen2brain/malgo` — cgo bindings to miniaudio, the actual output device (WASAPI/etc.)
 
 ### External (Build)
 - `wails3` CLI — bindings, syso, icons, dev runner
