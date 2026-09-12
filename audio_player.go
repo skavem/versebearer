@@ -120,6 +120,20 @@ type player struct {
 	status   playerStatus
 	gen      uint64 // см. И4
 
+	// Этап 5 (trim/фейды) — три поля, кэшированные на момент старта трека и
+	// нужные повторно при пересборке цепочки на Seek, по тому же соображению,
+	// что fileRate/gainDb выше. Единицы измерения РАЗНЫЕ — специально разные
+	// имена, а не одна общая "позиция", это и есть главная ловушка этапа
+	// (см. fileSamples/deviceSamples ниже):
+	//   trimStartFileFrame — TrimStartMs в СЭМПЛАХ ФАЙЛА (fileSamples),
+	//   totalSamples/fadeSamples — в СЭМПЛАХ УСТРОЙСТВА (deviceSamples),
+	//   потому что Take/Transition в buildChain стоят ПОСЛЕ Resample.
+	// totalSamples == -1: трек без границы (нет ни TrimEndMs, ни TrimStartMs,
+	// ни фейда) — труба играет до естественного конца файла, как до этапа 5.
+	trimStartFileFrame int
+	totalSamples       int
+	fadeSamples        int
+
 	trackId    uint
 	playlistId uint
 	itemId     uint
@@ -153,6 +167,15 @@ type trackMeta struct {
 	durationMs int
 	fileRate   beep.SampleRate
 	gainDb     float64
+
+	// Этап 5 — см. одноимённые поля player выше. Продюсеры (Play/tryAdvance)
+	// ОБЯЗАНЫ явно выставлять totalSamples: -1, если у трека нет границы —
+	// нулевое значение по умолчанию означало бы "0 сэмплов осталось", что для
+	// Seek выглядело бы как "перемотка сразу упирается в конец", а не как
+	// "трек без трима/фейда".
+	trimStartFileFrame int
+	totalSamples       int
+	fadeSamples        int
 }
 
 // newPlayer создаёт движок с постоянным микшером/громкостью/паузой —
@@ -332,19 +355,110 @@ func (p *player) resetTrackFieldsLocked() {
 	p.peak.Store(0)
 }
 
+// fileSamples переводит миллисекунды в сэмплы ФАЙЛА при заданной частоте
+// дискретизации файла — единственное законное применение: src.Seek() и
+// TrimStartMs. ⚠️ НЕ путать с deviceSamples: buildChain ставит Take/Transition
+// ПОСЛЕ beep.Resample, то есть уже на частоте УСТРОЙСТВА. Одна общая функция
+// «мс↔сэмплы» была бы приглашением перепутать: на файле 44100 Гц при
+// устройстве 48000 Гц ошибка 8.8%, а на машине разработки (устройство
+// открывается на 96000 Гц) — больше чем вдвое.
+func fileSamples(ms int, fileRate beep.SampleRate) int {
+	if ms <= 0 || fileRate <= 0 {
+		return 0
+	}
+	return int(float64(ms) / 1000 * float64(fileRate))
+}
+
+// deviceSamples — тот же расчёт, но для сэмплов УСТРОЙСТВА (после Resample):
+// TrimEndMs -> beep.Take, FadeMs -> границы beep.Transition, длительность
+// после обрезки для UI. См. предупреждение у fileSamples.
+func deviceSamples(ms int, devRate beep.SampleRate) int {
+	if ms <= 0 || devRate <= 0 {
+		return 0
+	}
+	return int(float64(ms) / 1000 * float64(devRate))
+}
+
+// trimFadeSamplesAt пересчитывает "сколько сэмплов устройства осталось
+// сыграть" (remaining) и "сколько из них — фейд-аут в конце" (fade)
+// относительно posSamples — позиции ВНУТРИ уже посчитанного totalSamples
+// (0 — старт трека, иначе — новая позиция после Seek).
+//
+// ⚠️ Обязательна при каждой пересборке чейна на Seek: beep.Take хранит
+// remains int (compositors.go:20-23) и не идемпотентен — если строить новый
+// Take с исходным totalSamples вместо (totalSamples-posSamples), трек либо
+// не остановится вовремя (после перемотки внутрь конца трима будет играть
+// дольше, чем должен), либо, наоборот, оборвётся раньше времени.
+//
+// totalSamples == -1 — трек без границы (ни TrimEndMs, ни TrimStartMs, ни
+// фейда не задано): remaining тоже -1 ("без ограничения" для buildChain),
+// fade всегда 0 — раз границы нет, фейду просто не от чего отсчитываться.
+func trimFadeSamplesAt(totalSamples, fadeSamples, posSamples int) (remaining, fade int) {
+	if totalSamples < 0 {
+		return -1, 0
+	}
+	remaining = totalSamples - posSamples
+	if remaining < 0 {
+		remaining = 0
+	}
+	fade = fadeSamples
+	if fade > remaining {
+		fade = remaining
+	}
+	return remaining, fade
+}
+
 // buildChain собирает общую хвостовую часть цепочки — Resample -> Volume ->
-// Seq(..., Callback(done<-gen)) — используемую и Play() (после decode), и
-// Seek() (после src.Seek() на уже открытом декодере). Вынесена отдельно,
-// чтобы её можно было прогнать в тесте (TestSeekRebuildNoStaleTail) без
-// похода в БД/файлы — источником достаточно любого beep.Streamer.
+// [Take по totalSamples, с фейд-аутом на последних fadeSamples] ->
+// Seq(..., Callback(done<-gen)) — используемую и Play()/tryAdvance() (после
+// decode), и Seek()/FadeOutStop() (после src.Seek() на уже открытом
+// декодере). Вынесена отдельно, чтобы её можно было прогнать в тестах
+// (TestSeekRebuildNoStaleTail, TestTrimTakesExactSamples, TestFadeOutStopDrains)
+// без похода в БД/файлы — источником достаточно любого beep.Streamer.
 //
 // Base: 10, Volume: GainDb/20 — ПРАВИЛЬНО (амплитуда = 10^(дБ/20)).
 // Собственная документация beep (effects/volume.go:12-13) советует dB/10 —
 // не верить, это дало бы двукратную ошибку в децибелах.
-func buildChain(src beep.Streamer, fileRate, devRate beep.SampleRate, gainDb float64, done chan<- uint64, gen uint64) beep.Streamer {
+//
+// totalSamples == -1 — без ограничения длины (труба играет до естественного
+// конца файла, как до этапа 5). totalSamples >= 0 — жёсткая граница в
+// сэмплах УСТРОЙСТВА (TrimEndMs, конец окна после Seek, либо длина фейда для
+// FadeOutStop). fadeSamples > 0 — последние fadeSamples сэмплов этой границы
+// плавно уходят в тишину (effects.TransitionEqualPower, не линейный: на
+// линейном в середине перехода слышен провал громкости).
+//
+// ⚠️ effects.Transition НИКОГДА не отдаёт ok=false сам — Stream (transition.go:
+// 54-70) возвращает ok ИСТОЧНИКА, а после len продолжает тянуть его с
+// endGain. Поэтому Transition всегда обёрнут во внешний beep.Take(fadeSamples,
+// ...), который честно отдаёт 0,false по исчерпании (compositors.go:26-34).
+// Без этого «Стоп с фейдом» увёл бы звук в тишину, а трек формально играл бы
+// ещё минуты: audio_stopped не пришёл бы, автопереход не сработал бы, UI
+// показывал бы воспроизведение, а следующий Play() наложился бы поверх.
+//
+// ⚠️ fadeSamples == 0 ОБЯЗАН полностью обходить effects.Transition, а не
+// просто вызывать её с len=0: внутри transition.go:59 прогресс считается как
+// pos/len — при len==0 это 0/0 = NaN, а min(NaN, 1.0) в Go тоже возвращает
+// NaN, и весь буфер сэмплов становится NaN — на части звуковых драйверов это
+// громкий хлопок. Ветка ниже поэтому проверяет fadeSamples > 0 отдельно, а не
+// полагается на то, что Transition с нулевой длиной "сама" ничего не сделает
+// — не упрощать это условие обратно.
+func buildChain(src beep.Streamer, fileRate, devRate beep.SampleRate, gainDb float64, totalSamples, fadeSamples int, done chan<- uint64, gen uint64) beep.Streamer {
 	resampled := beep.Resample(4, fileRate, devRate, src)
 	withGain := &effects.Volume{Streamer: resampled, Base: 10, Volume: gainDb / 20}
-	return beep.Seq(withGain, beep.Callback(func() {
+
+	var body beep.Streamer = withGain
+	if totalSamples >= 0 {
+		if fadeSamples > 0 {
+			body = beep.Seq(
+				beep.Take(totalSamples-fadeSamples, withGain),
+				beep.Take(fadeSamples, effects.Transition(withGain, fadeSamples, 1, 0, effects.TransitionEqualPower)),
+			)
+		} else {
+			body = beep.Take(totalSamples, withGain)
+		}
+	}
+
+	return beep.Seq(body, beep.Callback(func() {
 		select {
 		case done <- gen:
 		default:
@@ -375,6 +489,9 @@ func (p *player) startTrack(gen uint64, chain beep.Streamer, src beep.StreamSeek
 	p.src = src
 	p.fileRate = meta.fileRate
 	p.gainDb = meta.gainDb
+	p.trimStartFileFrame = meta.trimStartFileFrame
+	p.totalSamples = meta.totalSamples
+	p.fadeSamples = meta.fadeSamples
 	p.trackId, p.playlistId, p.itemId = meta.trackId, meta.playlistId, meta.itemId
 	p.durationMs = meta.durationMs
 	p.nextTitle = ""
@@ -393,6 +510,14 @@ type seekSnapshot struct {
 	fileRate beep.SampleRate
 	devRate  beep.SampleRate
 	gainDb   float64
+
+	// Этап 5 — см. одноимённые поля player. Нужны Seek()/FadeOutStop(), чтобы
+	// пересчитать remaining/fade ОТНОСИТЕЛЬНО новой позиции (trimFadeSamplesAt),
+	// а trimStartFileFrame — чтобы перевести UI-позицию (0 = TrimStartMs) в
+	// абсолютный файловый Seek.
+	trimStartFileFrame int
+	totalSamples       int
+	fadeSamples        int
 }
 
 // snapshotForSeek — единственная правильная точка входа для перемотки.
@@ -425,7 +550,15 @@ func (p *player) snapshotForSeek() (snap seekSnapshot, gen uint64, ok bool) {
 	p.gen++
 	p.mix.Clear()
 	p.drainDoneLocked()
-	return seekSnapshot{src: p.src, fileRate: p.fileRate, devRate: p.devRate, gainDb: p.gainDb}, p.gen, true
+	return seekSnapshot{
+		src:                p.src,
+		fileRate:           p.fileRate,
+		devRate:            p.devRate,
+		gainDb:             p.gainDb,
+		trimStartFileFrame: p.trimStartFileFrame,
+		totalSamples:       p.totalSamples,
+		fadeSamples:        p.fadeSamples,
+	}, p.gen, true
 }
 
 // resumeChain — как startTrack, но для seek: тот же трек и тот же src

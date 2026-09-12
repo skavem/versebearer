@@ -33,6 +33,17 @@ type pendingNext struct {
 	durationMs int
 	err        error
 
+	// Этап 5 (trim/фейды): fadeMs — FadeMs плейлиста на момент подготовки,
+	// известен уже в preparePendingNext (playlist уже загружен для проверки
+	// AutoAdvance). trimStartFileFrame/totalSamples/fadeSamples считает
+	// decodePendingNext ПОСЛЕ decodeExt — тем же способом, что и Play()
+	// в audio_service.go, и по той же причине (нужны devRate/format.SampleRate,
+	// которых нет до открытия файла).
+	fadeMs             int
+	trimStartFileFrame int
+	totalSamples       int
+	fadeSamples        int
+
 	// canceled — Play()/Stop()/мутация плейлиста опередили автопереход.
 	// Проверяется самой decodePendingNext ПОСЛЕ decodeExt: decode нельзя
 	// прервать на середине, но можно не устанавливать то, что уже никому не
@@ -143,7 +154,8 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 		playlistId: playlistId,
 		ready:      make(chan struct{}),
 		gainDb:     next.Track.GainDb,
-		durationMs: next.Track.DurationMs,
+		durationMs: trimmedDurationMs(next.Track), // этап 5: UI считает от TrimStartMs
+		fadeMs:     playlist.FadeMs,
 	}
 
 	// Более старый pending (если preparePendingNext почему-то вызвали дважды
@@ -200,13 +212,28 @@ func (a *AudioService) nextPlaylistItem(playlistId, afterItemId uint, loop bool)
 // обращения к БД, только файловый ввод-вывод.
 func (a *AudioService) decodePendingNext(pn *pendingNext, item models.PlaylistItem) {
 	mediaDir, err := paths.MediaDir()
+	var trimStartFrame int
 	if err == nil {
 		var src beep.StreamSeekCloser
 		var format beep.Format
 		src, format, err = decodeExt(filepath.Join(mediaDir, item.Track.FileName), filepath.Ext(item.Track.FileName))
 		if err == nil {
+			// ⚠️ fileSamples, не deviceSamples — та же ловушка, что и в
+			// Play() (audio_service.go): src.Seek() двигает курсор декодера
+			// на его РОДНОЙ частоте, а не частоте устройства.
+			trimStartFrame = fileSamples(item.Track.TrimStartMs, format.SampleRate)
+			if trimStartFrame > 0 {
+				if seekErr := src.Seek(trimStartFrame); seekErr != nil {
+					src.Close()
+					err = seekErr
+				}
+			}
+		}
+		if err == nil {
 			pn.src = src
 			pn.fileRate = format.SampleRate
+			pn.trimStartFileFrame = trimStartFrame
+			pn.totalSamples, pn.fadeSamples = trackChainBounds(item.Track, pn.fadeMs, a.pl.deviceRateSnapshot())
 		}
 	}
 	pn.err = err
@@ -250,14 +277,17 @@ func (a *AudioService) tryAdvance(finished trackMeta, gen uint64) bool {
 	}
 
 	devRate := a.pl.deviceRateSnapshot()
-	chain := buildChain(pn.src, pn.fileRate, devRate, pn.gainDb, a.pl.done, gen)
+	chain := buildChain(pn.src, pn.fileRate, devRate, pn.gainDb, pn.totalSamples, pn.fadeSamples, a.pl.done, gen)
 	meta := trackMeta{
-		trackId:    pn.trackId,
-		playlistId: pn.playlistId,
-		itemId:     pn.itemId,
-		durationMs: pn.durationMs,
-		fileRate:   pn.fileRate,
-		gainDb:     pn.gainDb,
+		trackId:            pn.trackId,
+		playlistId:         pn.playlistId,
+		itemId:             pn.itemId,
+		durationMs:         pn.durationMs,
+		fileRate:           pn.fileRate,
+		gainDb:             pn.gainDb,
+		trimStartFileFrame: pn.trimStartFileFrame,
+		totalSamples:       pn.totalSamples,
+		fadeSamples:        pn.fadeSamples,
 	}
 	installed, staleSrc := a.pl.startTrack(gen, chain, pn.src, meta)
 	if staleSrc != nil {

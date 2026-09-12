@@ -211,3 +211,40 @@ func TestConcurrentStopDuringAutoAdvanceDoesNotRace(t *testing.T) {
 		t.Fatalf("final status = %q, want idle after explicit Stop()", st.Status)
 	}
 }
+
+// TestFadeOutStopStopsPlayback — сквозной тест (не только на голом chain, как
+// TestFadeOutStopDrains, а через реальный AudioService.FadeOutStop()):
+// плейлист с FadeMs, Play, FadeOutStop — обязано дойти до idle за конечное
+// время. Без внешнего beep.Take вокруг effects.Transition (см. buildChain)
+// этот тест зависал бы в driveUntil навсегда: audio_stopped/done никогда бы
+// не пришли, потому что Transition сам по себе никогда не отдаёт ok=false.
+func TestFadeOutStopStopsPlayback(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	src := filepath.Join(t.TempDir(), "fade.wav")
+	writeTestWav(t, src, 1.0) // заведомо длиннее FadeMs ниже
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+
+	playlist := models.Playlist{Name: "Фейд", FadeMs: 50}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: res.Track.ID, Position: 1}
+	if err := inits.DB.Create(&item).Error; err != nil {
+		t.Fatalf("create playlist item: %v", err)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusPlaying) })
+
+	a.FadeOutStop()
+
+	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusIdle) })
+}

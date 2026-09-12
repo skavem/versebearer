@@ -221,6 +221,22 @@
             />
             По кругу
           </label>
+          <label class="flex items-center gap-1">
+            Фейд
+            <input
+              type="number"
+              min="0"
+              step="50"
+              value={playlist.fadeMs}
+              title="Длительность плавного перехода на границе треков, мс — 0 отключает фейд"
+              onchange={(e) =>
+                audioStore.setPlaylistFlags(playlist.ID, {
+                  fadeMs: Math.max(0, Number(e.currentTarget.value) || 0),
+                })}
+              class="input input-bordered input-xs w-16"
+            />
+            мс
+          </label>
         </div>
       </div>
 

@@ -163,7 +163,7 @@ func TestStopClosesSourceOutsideMuAndDropsStaleDone(t *testing.T) {
 	}}
 
 	gen := p.nextGen()
-	installed, _ := p.startTrack(gen, generators.Silence(-1), src, trackMeta{trackId: 1, itemId: 1})
+	installed, _ := p.startTrack(gen, generators.Silence(-1), src, trackMeta{trackId: 1, itemId: 1, totalSamples: -1})
 	if !installed {
 		t.Fatal("startTrack should install the first chain")
 	}
@@ -280,8 +280,8 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 	p.devRate = rate
 	src := &sineSrc{rate: int(rate), freq: 440}
 	gen := p.nextGen()
-	chain := buildChain(src, rate, rate, 0, p.done, gen)
-	if installed, _ := p.startTrack(gen, chain, src, trackMeta{fileRate: rate, itemId: 1}); !installed {
+	chain := buildChain(src, rate, rate, 0, -1, 0, p.done, gen)
+	if installed, _ := p.startTrack(gen, chain, src, trackMeta{fileRate: rate, itemId: 1, totalSamples: -1}); !installed {
 		t.Fatal("startTrack failed")
 	}
 
@@ -301,7 +301,7 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 	if err := snap.src.Seek(seekTo); err != nil {
 		t.Fatalf("Seek: %v", err)
 	}
-	chain2 := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, p.done, gen2)
+	chain2 := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, snap.totalSamples, snap.fadeSamples, p.done, gen2)
 	if !p.resumeChain(gen2, chain2, snap.src, seekTo) {
 		t.Fatal("resumeChain rejected a legitimate seek")
 	}
@@ -318,8 +318,8 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 		t.Fatalf("ref Seek: %v", err)
 	}
 	refGen := refP.nextGen()
-	refChain := buildChain(refSrc, rate, rate, 0, refP.done, refGen)
-	if installed, _ := refP.startTrack(refGen, refChain, refSrc, trackMeta{fileRate: rate, itemId: 1}); !installed {
+	refChain := buildChain(refSrc, rate, rate, 0, -1, 0, refP.done, refGen)
+	if installed, _ := refP.startTrack(refGen, refChain, refSrc, trackMeta{fileRate: rate, itemId: 1, totalSamples: -1}); !installed {
 		t.Fatal("ref startTrack failed")
 	}
 	want := make([][2]float64, 32)
@@ -331,5 +331,184 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 		if diff := got[i][0] - want[i][0]; diff > 1e-9 || diff < -1e-9 {
 			t.Fatalf("sample %d = %v, want %v — stale resampler tail after seek", i, got[i][0], want[i][0])
 		}
+	}
+}
+
+// TestFadeOutStopDrains — план, этап 5, ГЛАВНЫЙ тест этапа. effects.Transition
+// НИКОГДА не отдаёт ok=false сам (transition.go:54-70): Stream возвращает ok
+// ИСТОЧНИКА, а после len продолжает тянуть его с endGain. Без внешнего
+// beep.Take «Стоп с фейдом» увёл бы звук в тишину, а трек формально играл бы
+// ещё минуты — audio_stopped не пришёл бы, следующий Play() наложился бы
+// поверх. Строит ровно ту цепочку, что строит AudioService.FadeOutStop()
+// (totalSamples == fadeSamples == вся оставшаяся жизнь цепочки — фейд), и
+// требует ok=false НЕ ПОЗЖЕ fadeSamples сэмплов устройства.
+//
+// ⚠️ Читает chain.Stream() НАПРЯМУЮ, а не через p.mvol/p.mix: beep.Mixer
+// убирает дренированный стример и, будучи пустым, дальше сам честно отдаёт
+// тишину с ok=true (stopWhenEmpty=false по умолчанию, см. И6/комментарий у
+// onSamples) — то есть замаскировал бы ровно тот баг, который этот тест
+// обязан ловить.
+func TestFadeOutStopDrains(t *testing.T) {
+	const rate = beep.SampleRate(8000)
+	const fadeMs = 250
+	fadeSamples := deviceSamples(fadeMs, rate)
+
+	src := &sineSrc{rate: int(rate), freq: 440}
+	chain := buildChain(src, rate, rate, 0, fadeSamples, fadeSamples, make(chan uint64, 1), 1)
+
+	buf := make([][2]float64, 37) // намеренно не делитель fadeSamples — ловит ошибки на границах чанков
+	total := 0
+	drained := false
+	for i := 0; i < 10000; i++ {
+		n, ok := chain.Stream(buf)
+		total += n
+		if !ok {
+			drained = true
+			break
+		}
+	}
+	if !drained {
+		t.Fatalf("цепочка ни разу не отдала ok=false за %d сэмплов — баг effects.Transition (никогда не отдаёт ok=false сам) не заблокирован внешним beep.Take", total)
+	}
+	if total > fadeSamples {
+		t.Fatalf("отдренировалась после %d сэмплов, ожидалось не позже fadeSamples=%d", total, fadeSamples)
+	}
+}
+
+// TestTrimTakesExactSamples — план, этап 5: "число сэмплов после ресемпла при
+// заданных TrimStartMs/TrimEndMs". ⚠️ Частота файла (44100) сознательно
+// ОТЛИЧАЕТСЯ от частоты устройства (48000): buildChain ставит Take ПОСЛЕ
+// Resample, то есть считает в сэмплах УСТРОЙСТВА. Тест с одинаковыми частотами
+// прошёл бы даже при перепутанных fileSamples/deviceSamples — главная ловушка
+// этапа (audio-playlist-implementation.md, "Две частоты, две функции").
+func TestTrimTakesExactSamples(t *testing.T) {
+	const fileRate = beep.SampleRate(44100)
+	const devRate = beep.SampleRate(48000)
+
+	track := models.AudioTrack{DurationMs: 10000, TrimStartMs: 1000, TrimEndMs: 6000}
+	if wantMs := trimmedDurationMs(track); wantMs != 5000 {
+		t.Fatalf("trimmedDurationMs = %d, want 5000 (TrimEndMs-TrimStartMs)", wantMs)
+	}
+	totalSamples, fadeSamples := trackChainBounds(track, 0, devRate)
+	if fadeSamples != 0 {
+		t.Fatalf("fadeSamples = %d, want 0 (FadeMs=0)", fadeSamples)
+	}
+	wantSamples := deviceSamples(5000, devRate) // на частоте УСТРОЙСТВА, не файла
+	if totalSamples != wantSamples {
+		t.Fatalf("totalSamples = %d, want %d (deviceSamples(5000, devRate))", totalSamples, wantSamples)
+	}
+
+	src := &sineSrc{rate: int(fileRate), freq: 440}
+	chain := buildChain(src, fileRate, devRate, 0, totalSamples, fadeSamples, make(chan uint64, 1), 1)
+
+	// Читаем chain.Stream() напрямую — см. предупреждение у TestFadeOutStopDrains
+	// про beep.Mixer, маскирующий ok=false пустотой.
+	buf := make([][2]float64, 97) // не делитель totalSamples — ловит ошибки на границах чанков
+	total := 0
+	for i := 0; i < 100000; i++ {
+		n, ok := chain.Stream(buf)
+		total += n
+		if total > totalSamples {
+			t.Fatalf("поток не остановился на totalSamples=%d, дошёл до %d", totalSamples, total)
+		}
+		if !ok {
+			break
+		}
+	}
+	if total != totalSamples {
+		t.Fatalf("отдано %d сэмплов устройства, ожидалось ровно %d", total, totalSamples)
+	}
+}
+
+// TestZeroFadeProducesNoNaN — план, этап 5: FadeMs=0 обязан ПОЛНОСТЬЮ обходить
+// effects.Transition, а не просто вызывать её с len=0. Внутри transition.go:59
+// прогресс считается как pos/len — при len==0 это 0/0 = NaN, а min(NaN, 1.0) в
+// Go тоже возвращает NaN: весь буфер сэмплов стал бы NaN, что на части
+// звуковых драйверов звучит как громкий хлопок при каждом вызове Stream().
+func TestZeroFadeProducesNoNaN(t *testing.T) {
+	const rate = beep.SampleRate(8000)
+	const total = 500 // граница есть (TrimEndMs), но фейда на ней нет (FadeMs=0)
+
+	src := &sineSrc{rate: int(rate), freq: 440}
+	chain := buildChain(src, rate, rate, 0, total, 0, make(chan uint64, 1), 1)
+
+	buf := make([][2]float64, 64)
+	streamed := 0
+	for streamed < 600 {
+		n, ok := chain.Stream(buf)
+		for i := 0; i < n; i++ {
+			if math.IsNaN(buf[i][0]) || math.IsNaN(buf[i][1]) {
+				t.Fatalf("NaN сэмпл на позиции %d — FadeMs=0 обязан полностью обходить effects.Transition, а не звать её с len=0", streamed+i)
+			}
+		}
+		streamed += n
+		if !ok {
+			break
+		}
+	}
+}
+
+// TestSeekRecomputesRemainingFromNewPosition — план, этап 5: beep.Take хранит
+// remains int (compositors.go:20-23) и не идемпотентен. При пересборке
+// цепочки после Seek totalSamples для buildChain обязан считаться как
+// (исходный totalSamples − новая позиция), а не переиспользовать исходное
+// значение — иначе после перемотки внутрь обрезанного окна трек либо не
+// остановится вовремя, либо оборвётся раньше времени.
+func TestSeekRecomputesRemainingFromNewPosition(t *testing.T) {
+	const rate = beep.SampleRate(8000)
+	const total = 4000  // окно после трима — 4000 сэмплов устройства
+	const seekTo = 2500 // перематываем внутрь окна: до конца остаётся 1500
+
+	p := newPlayer(1.0, "")
+	p.devRate = rate
+	src := &sineSrc{rate: int(rate), freq: 440}
+	gen := p.nextGen()
+	chain := buildChain(src, rate, rate, 0, total, 0, p.done, gen)
+	if installed, _ := p.startTrack(gen, chain, src, trackMeta{fileRate: rate, itemId: 1, totalSamples: total}); !installed {
+		t.Fatal("startTrack failed")
+	}
+
+	// "Прогреваем", как TestSeekRebuildNoStaleTail — читаем немного до seek.
+	warm := make([][2]float64, 500)
+	if _, ok := p.mvol.Stream(warm); !ok {
+		t.Fatal("warm-up failed")
+	}
+
+	snap, gen2, ok := p.snapshotForSeek()
+	if !ok {
+		t.Fatal("snapshotForSeek: nothing to seek")
+	}
+	if err := snap.src.Seek(seekTo); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+
+	remaining, fade := trimFadeSamplesAt(snap.totalSamples, snap.fadeSamples, seekTo)
+	wantRemaining := total - seekTo
+	if remaining != wantRemaining {
+		t.Fatalf("remaining = %d, want %d (total-seekTo, а не исходный total=%d)", remaining, wantRemaining, total)
+	}
+
+	chain2 := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, remaining, fade, p.done, gen2)
+	if !p.resumeChain(gen2, chain2, snap.src, int64(seekTo)) {
+		t.Fatal("resumeChain rejected a legitimate seek")
+	}
+
+	// Читаем chain2.Stream() напрямую, а не через p.mvol/p.mix — см.
+	// предупреждение у TestFadeOutStopDrains про beep.Mixer, маскирующий
+	// ok=false пустотой после дренирования.
+	buf := make([][2]float64, 33)
+	got := 0
+	for i := 0; i < 10000; i++ {
+		n, ok := chain2.Stream(buf)
+		got += n
+		if got > wantRemaining {
+			t.Fatalf("поток продолжается после %d сэмплов (ожидалось <= %d) — Take пересобран от ИСХОДНОГО total, а не от новой позиции", got, wantRemaining)
+		}
+		if !ok {
+			break
+		}
+	}
+	if got != wantRemaining {
+		t.Fatalf("после seek отдано %d сэмплов, ожидалось ровно %d (total-newPos)", got, wantRemaining)
 	}
 }

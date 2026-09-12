@@ -13,6 +13,7 @@ import (
 	"changeme/backend/models"
 	"changeme/backend/paths"
 
+	"github.com/gopxl/beep/v2"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -211,6 +212,50 @@ func (a *AudioService) State() PlayerState {
 	return st
 }
 
+// trimmedDurationMs — «длительность после обрезки» для UI (план, этап 5):
+// PositionMs/DurationMs и Seek() считаются от TrimStartMs, а не от начала
+// исходного файла, поэтому это то, что реально услышит оператор, а не полная
+// длина файла. TrimEndMs == 0 значит "играть до конца" (см. models.AudioTrack).
+func trimmedDurationMs(track models.AudioTrack) int {
+	end := track.DurationMs
+	if track.TrimEndMs > 0 {
+		end = track.TrimEndMs
+	}
+	d := end - track.TrimStartMs
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// trackChainBounds считает totalSamples/fadeSamples (СЭМПЛЫ УСТРОЙСТВА, см.
+// deviceSamples в audio_player.go) для buildChain при СТАРТЕ трека
+// (posSamples подразумевается 0 — пересчёт на другую позицию делает
+// trimFadeSamplesAt, см. Seek/FadeOutStop). totalSamples == -1 означает "без
+// ограничения": ни TrimStartMs, ни TrimEndMs, ни фейд не заданы — тогда
+// buildChain строит чистую трубу без единого beep.Take, как было до этапа 5.
+//
+// fadeMs — FadeMs плейлиста, а не самого трека (фейд — граница между
+// элементами плейлиста, план: "Fade-out перед автопереходом строится в
+// цепочку сразу", а не по сигналу done — тот приходит, когда дренировать уже
+// нечего). Обрезаем fadeSamples до totalSamples: иначе (короткий трим/трек
+// короче фейда) beep.Take(totalSamples-fadeSamples, ...) получил бы
+// отрицательную длину и фейд перекрыл бы саму границу обрезки, "съев" кусок
+// сверх TrimEndMs.
+func trackChainBounds(track models.AudioTrack, fadeMs int, devRate beep.SampleRate) (totalSamples, fadeSamples int) {
+	totalSamples = -1
+	if track.TrimStartMs > 0 || track.TrimEndMs > 0 || fadeMs > 0 {
+		totalSamples = deviceSamples(trimmedDurationMs(track), devRate)
+	}
+	if fadeMs > 0 && totalSamples >= 0 {
+		fadeSamples = deviceSamples(fadeMs, devRate)
+		if fadeSamples > totalSamples {
+			fadeSamples = totalSamples
+		}
+	}
+	return totalSamples, fadeSamples
+}
+
 // Play начинает воспроизведение элемента плейлиста itemId. Повторный Play
 // на уже играющий itemId — no-op, не рестарт (И5): оператор, дважды
 // кликнувший по строке, не должен услышать, как трек начался заново.
@@ -239,6 +284,16 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 		return fmt.Errorf("не удалось определить каталог медиатеки: %w", err)
 	}
 
+	// FadeMs плейлиста нужен уже сейчас, а не по приходу done (этап 5,
+	// buildChain): фейд-аут перед автопереходом строится в цепочку сразу при
+	// старте трека. Отсутствие плейлиста (не должно случаться, но не повод
+	// падать) — fadeMs=0, как если бы фейд не был настроен.
+	fadeMs := 0
+	var playlist models.Playlist
+	if err := inits.DB.First(&playlist, playlistId).Error; err == nil {
+		fadeMs = playlist.FadeMs
+	}
+
 	// Резервируем поколение ДО дорогой сборки цепочки (И4): любой
 	// play/stop/seek, начавшийся, пока этот Play ещё декодирует файл,
 	// должен суметь его отменить через несовпадение gen в startTrack.
@@ -249,16 +304,30 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 		return fmt.Errorf("не удалось открыть файл %q: %w", track.FileName, err)
 	}
 
+	// ⚠️ fileSamples, не deviceSamples: src.Seek() двигает курсор ДЕКОДЕРА,
+	// который читает файл на его РОДНОЙ частоте — главная ловушка этапа 5.
+	trimStartFrame := fileSamples(track.TrimStartMs, format.SampleRate)
+	if trimStartFrame > 0 {
+		if err := src.Seek(trimStartFrame); err != nil {
+			src.Close()
+			return fmt.Errorf("не удалось обрезать начало %q: %w", track.FileName, err)
+		}
+	}
+
 	devRate := a.pl.deviceRateSnapshot()
-	chain := buildChain(src, format.SampleRate, devRate, track.GainDb, a.pl.done, gen)
+	totalSamples, fadeSamples := trackChainBounds(track, fadeMs, devRate)
+	chain := buildChain(src, format.SampleRate, devRate, track.GainDb, totalSamples, fadeSamples, a.pl.done, gen)
 
 	meta := trackMeta{
-		trackId:    track.ID,
-		playlistId: playlistId,
-		itemId:     itemId,
-		durationMs: track.DurationMs, // трим ещё не применяется — этап 5
-		fileRate:   format.SampleRate,
-		gainDb:     track.GainDb,
+		trackId:            track.ID,
+		playlistId:         playlistId,
+		itemId:             itemId,
+		durationMs:         trimmedDurationMs(track),
+		fileRate:           format.SampleRate,
+		gainDb:             track.GainDb,
+		trimStartFileFrame: trimStartFrame,
+		totalSamples:       totalSamples,
+		fadeSamples:        fadeSamples,
 	}
 	installed, staleSrc := a.pl.startTrack(gen, chain, src, meta)
 	if staleSrc != nil {
@@ -296,15 +365,26 @@ func (a *AudioService) Stop() {
 	a.emit("audio_stopped", nil)
 }
 
-// Seek перематывает текущий трек. snapshotForSeek атомарно (одной
-// критической секцией под p.mu) резервирует поколение И отцепляет текущую
-// цепочку от микшера — decode.Seek() ниже вызывается вне p.mu (дёшево:
-// go-mp3.Seek — это lseek по уже построенной в конструкторе таблице
-// фреймов плюс decode одного фрейма, а не полный проход по файлу), но
-// декодер уже недостижим для data-колбэка, пока мы им распоряжаемся (И1).
-// Ресемплер и громкость пересобираются заново поверх того же декодера
-// (buildChain) — иначе первые доли секунды после перемотки звучал бы
-// хвост старого места (beep.Resampler не сбрасывается, resample.go:78-86).
+// Seek перематывает текущий трек. ms — позиция ОТНОСИТЕЛЬНО TrimStartMs
+// (0 = начало прослушиваемого окна, см. trimmedDurationMs: "PositionMs/
+// DurationMs считаются от TrimStartMs, а не от начала исходного файла") —
+// поэтому к файловому Seek ниже прибавляется trimStartFileFrame, а к позиции
+// устройства (deviceFrame, для p.pos и для trimFadeSamplesAt) — нет: та уже в
+// системе координат "от начала прослушивания".
+//
+// snapshotForSeek атомарно (одной критической секцией под p.mu) резервирует
+// поколение И отцепляет текущую цепочку от микшера — decode.Seek() ниже
+// вызывается вне p.mu (дёшево: go-mp3.Seek — это lseek по уже построенной в
+// конструкторе таблице фреймов плюс decode одного фрейма, а не полный проход
+// по файлу), но декодер уже недостижим для data-колбэка, пока мы им
+// распоряжаемся (И1). Ресемплер и громкость пересобираются заново поверх
+// того же декодера (buildChain) — иначе первые доли секунды после перемотки
+// звучал бы хвост старого места (beep.Resampler не сбрасывается,
+// resample.go:78-86). По той же причине пересборка НИКОГДА не продолжает
+// фейд, что бы ни играло на месте seek: buildChain всегда строит свежий,
+// независимый effects.Transition, отсчитывающий прогресс от pos=0 —
+// попытка "продолжить" старый Transition через новый объект вместо этого
+// заставила бы гейн начаться заново со startGain при каждой перемотке.
 func (a *AudioService) Seek(msF float32) error {
 	ms := int(msF)
 	if ms < 0 {
@@ -316,19 +396,75 @@ func (a *AudioService) Seek(msF float32) error {
 		return fmt.Errorf("нечего перематывать: ничего не играет")
 	}
 
-	fileFrame := int(float64(ms) / 1000 * float64(snap.fileRate))
+	fileFrame := fileSamples(ms, snap.fileRate) + snap.trimStartFileFrame
 	if err := snap.src.Seek(fileFrame); err != nil {
 		return fmt.Errorf("не удалось перемотать: %w", err)
 	}
 
-	chain := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, a.pl.done, gen)
+	deviceFrame := deviceSamples(ms, snap.devRate)
+	// Take не идемпотентен (compositors.go:20-23) — remaining/fade считаются
+	// ЗАНОВО от новой позиции, а не от исходного snap.totalSamples (план,
+	// этап 5, главная ловушка Take).
+	remaining, fade := trimFadeSamplesAt(snap.totalSamples, snap.fadeSamples, deviceFrame)
+	chain := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, remaining, fade, a.pl.done, gen)
 
-	deviceFrame := int64(float64(ms) / 1000 * float64(snap.devRate))
 	// resumeChain==false значит нас обогнал Stop()/другой Play()/Seek() —
 	// не ошибка (И4): та операция уже поставила плеер в правильное
 	// состояние, наш устаревший результат просто отбрасывается.
-	a.pl.resumeChain(gen, chain, snap.src, deviceFrame)
+	a.pl.resumeChain(gen, chain, snap.src, int64(deviceFrame))
 	return nil
+}
+
+// FadeOutStop останавливает воспроизведение с фейдом — «Стоп с фейдом»
+// (план, этап 5). Использует FadeMs плейлиста ТЕКУЩЕГО трека, прочитанный
+// заново из БД (а не кэш trackMeta): оператор мог поправить FadeMs уже после
+// того, как трек начал играть, и стоп должен уважать актуальное значение.
+//
+// FadeMs<=0 сводится к обычному Stop(): effects.Transition вообще не
+// заводится (см. buildChain про NaN при len==0) — реализовано без
+// дублирования логики самим вызовом Stop().
+//
+// В остальном это Seek-подобная пересборка (snapshotForSeek), а не p.stop():
+// текущая цепочка заменяется на Take(fadeSamples, Transition(...,1,0,...))
+// ОТ ТЕКУЩЕЙ позиции — totalSamples и fadeSamples для buildChain здесь
+// совпадают: фейд — это ВСЯ оставшаяся жизнь цепочки, ничего не играет после
+// её конца. Когда она (гарантированно, за счёт внешнего beep.Take —
+// см. buildChain) дренируется, done придёт как обычное "трек доиграл", и
+// watchPlayerEvents обработает его как обычный конец воспроизведения:
+// invalidatePending здесь — по аналогии со Stop(), заранее подготовленный
+// "следующий" трек (автопереход) больше не актуален, раз оператор явно
+// остановил воспроизведение.
+func (a *AudioService) FadeOutStop() {
+	a.invalidatePending()
+
+	playlistId, _, ok := a.pl.currentItem()
+	if !ok {
+		a.Stop()
+		return
+	}
+
+	fadeMs := 0
+	var playlist models.Playlist
+	if err := inits.DB.First(&playlist, playlistId).Error; err == nil {
+		fadeMs = playlist.FadeMs
+	}
+	if fadeMs <= 0 {
+		a.Stop()
+		return
+	}
+
+	pos := a.pl.pos.Load() // сохраняем прогресс на время фейда — не перемотка, не 0
+	snap, gen, ok := a.pl.snapshotForSeek()
+	if !ok {
+		// Трек успел закончиться сам между currentItem() и этим моментом —
+		// гонка безопасна (И4): просто сообщаем "стоп".
+		a.emit("audio_stopped", nil)
+		return
+	}
+
+	fadeSamples := deviceSamples(fadeMs, snap.devRate)
+	chain := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, fadeSamples, fadeSamples, a.pl.done, gen)
+	a.pl.resumeChain(gen, chain, snap.src, pos)
 }
 
 // SetVolume меняет общую громкость (0..1) немедленно и планирует

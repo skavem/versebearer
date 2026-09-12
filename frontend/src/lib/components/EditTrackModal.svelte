@@ -21,6 +21,38 @@
     }
   });
 
+  // "м:сс" — план, этап 5: оператор задаёт границы обрезки на слух, секунды
+  // от начала файла удобнее читать и печатать, чем сырые миллисекунды.
+  function msToMinSec(ms: number): string {
+    if (!ms || ms <= 0) return "0:00";
+    const totalSec = Math.round(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}:${sec.toString().padStart(2, "0")}`;
+  }
+
+  function minSecToMs(text: string): number {
+    const m = text.trim().match(/^(\d+):([0-5]?\d)$/);
+    if (!m) return 0;
+    const min = parseInt(m[1], 10);
+    const sec = parseInt(m[2], 10);
+    return (min * 60 + sec) * 1000;
+  }
+
+  // «Взять текущую позицию» доступна, только пока играет (или на паузе)
+  // именно ЭТОТ трек: PlayerState.PositionMs считается ОТ TrimStartMs
+  // (audio-playlist-implementation.md, этап 5: "прогресс считается от
+  // TrimStartMs"), поэтому абсолютная позиция в исходном файле — это
+  // ИСХОДНЫЙ (ещё не сохранённый правкой) track.trimStartMs плюс текущий
+  // PositionMs, а не сам сырой PositionMs и не редактируемый trimStartMs.
+  const player = $derived(audioStore.player.state);
+  const isThisTrackLoaded = $derived(!!track && player?.trackId === track.ID);
+  const currentAbsoluteMs = $derived(
+    isThisTrackLoaded && track
+      ? track.trimStartMs + (player?.positionMs ?? 0)
+      : null,
+  );
+
   const close = () => {
     track = null;
   };
@@ -82,39 +114,72 @@
         <div class="flex gap-2">
           <label class="form-control flex-1">
             <div class="label py-1">
-              <span class="label-text text-xs">Начало, мс</span>
+              <span class="label-text text-xs">Начало, м:сс</span>
             </div>
-            <input
-              type="number"
-              min="0"
-              bind:value={trimStartMs}
-              class="input input-sm input-bordered w-full"
-            />
+            <div class="join w-full">
+              <input
+                type="text"
+                value={msToMinSec(trimStartMs)}
+                onchange={(e) =>
+                  (trimStartMs = minSecToMs(e.currentTarget.value))}
+                placeholder="0:00"
+                class="input input-sm input-bordered join-item w-full"
+              />
+              <button
+                type="button"
+                class="btn btn-sm join-item"
+                disabled={currentAbsoluteMs === null}
+                title="Взять текущую позицию воспроизведения"
+                onclick={() => {
+                  if (currentAbsoluteMs !== null) trimStartMs = currentAbsoluteMs;
+                }}
+              >
+                <MuiIcon name="my_location" style="font-size: 1rem" />
+              </button>
+            </div>
           </label>
           <label class="form-control flex-1">
             <div class="label py-1">
-              <span class="label-text text-xs">Конец, мс (0 = до конца)</span>
+              <span class="label-text text-xs">Конец, м:сс (0 = до конца)</span>
             </div>
-            <input
-              type="number"
-              min="0"
-              bind:value={trimEndMs}
-              class="input input-sm input-bordered w-full"
-            />
+            <div class="join w-full">
+              <input
+                type="text"
+                value={msToMinSec(trimEndMs)}
+                onchange={(e) =>
+                  (trimEndMs = minSecToMs(e.currentTarget.value))}
+                placeholder="0:00"
+                class="input input-sm input-bordered join-item w-full"
+              />
+              <button
+                type="button"
+                class="btn btn-sm join-item"
+                disabled={currentAbsoluteMs === null}
+                title="Взять текущую позицию воспроизведения"
+                onclick={() => {
+                  if (currentAbsoluteMs !== null) trimEndMs = currentAbsoluteMs;
+                }}
+              >
+                <MuiIcon name="my_location" style="font-size: 1rem" />
+              </button>
+            </div>
           </label>
         </div>
 
         <label class="form-control">
           <div class="label py-1">
-            <span class="label-text font-medium">Громкость, дБ</span>
+            <span class="label-text font-medium">Громкость</span>
+            <span class="label-text-alt font-mono"
+              >{gainDb > 0 ? "+" : ""}{gainDb.toFixed(1)} дБ</span
+            >
           </div>
           <input
-            type="number"
-            step="0.1"
+            type="range"
+            step="0.5"
             min="-12"
             max="12"
             bind:value={gainDb}
-            class="input input-bordered w-full"
+            class="range range-sm"
           />
         </label>
       </div>
