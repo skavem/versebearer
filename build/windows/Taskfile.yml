@@ -14,6 +14,7 @@ tasks:
             ref: .BUILD_FLAGS
       - task: common:build:reciever
       - task: common:generate:icons
+      - task: fetch:ffmpeg
     cmds:
       - task: generate:syso
         vars:
@@ -23,6 +24,11 @@ tasks:
         platforms: [windows]
       - cmd: rm -f *.syso
         platforms: [linux, darwin]
+      # Копирование — здесь, а не в deps fetch:ffmpeg: каталог bin/ создаёт
+      # именно go build выше, а deps в go-task выполняются параллельно — рядом
+      # с ним fetch:ffmpeg мог бы отработать раньше, чем bin/ появится.
+      - cmd: powershell Copy-Item build/windows/ffmpeg/ffmpeg.exe "{{.BIN_DIR}}/ffmpeg.exe" -Force
+        platforms: [windows]
     vars:
       # DEV=true собирает без тега production: тогда Wails компилирует dev-ветку
       # assetserver'а, которая читает FRONTEND_DEVSERVER_URL и проксирует фронт
@@ -63,3 +69,18 @@ tasks:
   run:
     cmds:
       - '{{.BIN_DIR}}\\{{.APP_NAME}}.exe'
+
+  fetch:ffmpeg:
+    summary: Скачивает ffmpeg для установщика (в git не хранится — сотня мегабайт)
+    run: once
+    dir: build/windows          # ⚠️ ОБЯЗАТЕЛЬНО: задачи выполняются от корня проекта.
+    # Без dir status смотрел бы в <корень>/ffmpeg/ffmpeg.exe, которого нет
+    # никогда — и 162 МБ качались бы при каждой сборке.
+    status:
+      - test -f ffmpeg/ffmpeg.exe
+    cmds:
+      # BtbN, LGPL static win64, .zip (не .7z — его штатный Expand-Archive не
+      # осилит). Извлекаем только bin/ffmpeg.exe и LICENSE.txt: ffprobe/ffplay
+      # не нужны, длительность и формат после импорта считает beep.
+      - cmd: powershell -NoProfile -Command '$ErrorActionPreference="Stop"; $url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-8.1.zip"; $zip=Join-Path $env:TEMP "vb-ffmpeg.zip"; $extractDir=Join-Path $env:TEMP "vb-ffmpeg-extract"; Invoke-WebRequest -Uri $url -OutFile $zip; if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }; Expand-Archive -Path $zip -DestinationPath $extractDir -Force; $root=Get-ChildItem $extractDir | Select-Object -First 1; New-Item -ItemType Directory -Force -Path ffmpeg | Out-Null; Copy-Item (Join-Path $root.FullName "bin\ffmpeg.exe") "ffmpeg\ffmpeg.exe" -Force; Copy-Item (Join-Path $root.FullName "LICENSE.txt") "ffmpeg\LICENSE.txt" -Force; Remove-Item $zip -Force; Remove-Item $extractDir -Recurse -Force'
+        platforms: [windows]

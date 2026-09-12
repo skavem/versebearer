@@ -34,6 +34,8 @@ Wails3 build pipeline. Shared tasks plus one subdirectory per target OS, each ho
 - Vite dev port is 9245 by default (root `Taskfile.yml` `VITE_PORT`). Override via env: `WAILS_VITE_PORT=NNN task dev`.
 - Binding generation passes `-clean=true`: the output directory is wiped first so files of deleted services don't linger. Safe only because `frontend/src/lib/bindings` is fully generated and gitignored.
 - `task test` at the repo root runs `go test ./...`. No Wails/frontend deps needed — tests construct `&DbHandler{}` with a nil app and rely on the `emit()` wrapper's nil-guard.
+- `windows/Taskfile.yml`'s `fetch:ffmpeg` downloads a BtbN LGPL static win64 build into `build/windows/ffmpeg/` (gitignored, ~130 MB) and `windows:build` copies `ffmpeg.exe` next to the app binary; `project.nsi` bundles it into the installer via `File "..\ffmpeg\ffmpeg.exe"` right after `wails.files`. **macOS and Linux do not ship ffmpeg** — those Taskfiles were deliberately left untouched, so on those platforms audio import only works for the four beep-native formats (mp3/wav/flac/ogg); anything else fails with "ffmpeg не найден", not a crash.
+- The NSIS uninstaller (`project.nsi`'s `Section "uninstall"`) does **not** remove `%LOCALAPPDATA%\versebearer\media` — imported audio tracks are user data, not build output, and survive an uninstall/reinstall. Only `$INSTDIR` (the app files) is removed.
 
 ## Dependencies
 

@@ -19,3 +19,6 @@ package-lock.json
 tmp/
 songs.json
 ROADMAP.md
+
+# ffmpeg для установщика — сотня мегабайт, скачивается задачей fetch:ffmpeg
+build/windows/ffmpeg/

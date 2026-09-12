@@ -85,8 +85,13 @@ Section
     !insertmacro wails.webview2runtime
 
     SetOutPath $INSTDIR
-    
+
     !insertmacro wails.files
+
+    # ffmpeg кладётся рядом с .exe: импорт фонограмм ищет его только там
+    # (см. ffmpegPath в audio_ffmpeg.go), системный ffmpeg из PATH игнорируется.
+    File "..\ffmpeg\ffmpeg.exe"
+    File "..\ffmpeg\LICENSE.txt"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
