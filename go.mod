@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/blevesearch/bleve/v2 v2.6.0
 	github.com/blevesearch/bleve_index_api v1.3.11
+	github.com/gen2brain/malgo v0.11.26
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/joho/godotenv v1.5.1
 	github.com/jus1d/gomorphy v0.2.3
