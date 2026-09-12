@@ -1,6 +1,8 @@
 package inits
 
 import (
+	"strconv"
+
 	"changeme/backend/models"
 
 	"gorm.io/driver/sqlite"
@@ -8,6 +10,20 @@ import (
 )
 
 var DB *gorm.DB
+
+// versionLT сравнивает GlobalState.Version с числом n. Раньше сравнение шло
+// как со строками ("10" < "4" — истина: байт '1' меньше '4'), и на версии 10
+// все блоки миграции ниже начали бы гоняться заново при каждом запуске —
+// например, блок "< 4" молча подменял бы настроенную оператором тему. Пустая
+// или нечисловая строка трактуется как 0, чтобы свежая БД по-прежнему
+// проходила все блоки миграции.
+func versionLT(v string, n int) bool {
+	parsed, err := strconv.Atoi(v)
+	if err != nil {
+		parsed = 0
+	}
+	return parsed < n
+}
 
 func init() {
 	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
@@ -34,12 +50,12 @@ func init() {
 	gs := models.GlobalState{}
 	db.FirstOrCreate(&gs, models.GlobalState{Model: gorm.Model{ID: 1}})
 
-	// version < "4": output styles moved from flat GlobalState columns into a
+	// version < 4: output styles moved from flat GlobalState columns into a
 	// first-class Theme. Seed the "По умолчанию" theme once and point
 	// ActiveThemeId at it. For an upgraded DB the legacy verse_*/couplet_*
 	// columns still exist — carry the user's tuned values over. For a fresh DB
 	// those columns were never created — fall back to hardcoded defaults.
-	if gs.Version < "4" {
+	if versionLT(gs.Version, 4) {
 		var seed models.Theme
 		if db.Migrator().HasColumn(&models.GlobalState{}, "verse_bg_color") {
 			// Legacy style columns still live on global_states — GORM maps them
@@ -56,17 +72,17 @@ func init() {
 			"active_theme_id": seed.ID,
 			"version":         "4",
 		})
-		// Keep the in-memory GlobalState in sync so the version<"5" seed below
+		// Keep the in-memory GlobalState in sync so the version<5 seed below
 		// (which runs in the same init on a fresh DB) sees the right theme.
 		gs.ActiveThemeId = &seed.ID
 		gs.Version = "4"
 	}
 
-	// version < "5": output styles/backdrops moved from the single active theme
+	// version < 5: output styles/backdrops moved from the single active theme
 	// to per-Output ThemeId (see models.Output). Seed one default Output
 	// ("Экран") pointing at the current active theme so the existing "нажал
 	// Транслировать" behavior is preserved unchanged after upgrade.
-	if gs.Version < "5" {
+	if versionLT(gs.Version, 5) {
 		db.Create(&models.Output{
 			Name:        "Экран",
 			ThemeId:     gs.ActiveThemeId,
@@ -77,18 +93,19 @@ func init() {
 		gs.Version = "5"
 	}
 
-	// version < "6": Output gained a window mode (models.Output.Mode) alongside
+	// version < 6: Output gained a window mode (models.Output.Mode) alongside
 	// the pre-existing frameless/always-on-top display mode. Existing rows
 	// predate the column, so their Mode is "" — pin it to "display" explicitly
 	// and give WinWidth/WinHeight sane defaults for if the operator ever
 	// switches that row to window mode later.
-	if gs.Version < "6" {
+	if versionLT(gs.Version, 6) {
 		db.Model(&models.Output{}).Where("mode = ?", "").Updates(map[string]any{
 			"mode":       "display",
 			"win_width":  1280,
 			"win_height": 720,
 		})
 		db.Model(&gs).Update("version", "6")
+		gs.Version = "6"
 	}
 
 	DB = db
