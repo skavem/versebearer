@@ -84,6 +84,15 @@ type GlobalState struct {
 	// straight into this theme. Nil only transiently before the default
 	// theme is seeded (see backend/inits/db.go).
 	ActiveThemeId *uint `json:"activeThemeId"`
+
+	// AudioDeviceId — последнее выбранное устройство вывода звука (malgo
+	// DeviceID.String()). Пустая строка — «системное по умолчанию».
+	AudioDeviceId string `json:"audioDeviceId"`
+	// AudioVolume — общая громкость плеера, 0..1. default:1, а не 0: любой
+	// путь создания GlobalState (в т.ч. будущий) обязан получить полную
+	// громкость, а не тишину — ноль здесь означает именно тишину, не «не
+	// задано».
+	AudioVolume float64 `json:"audioVolume" gorm:"default:1"`
 }
 
 // Theme is a named preset of verse+couplet output styles. Exactly one theme
@@ -177,4 +186,46 @@ type Output struct {
 	WinPlaced   bool `json:"winPlaced"`   // true once WinX/WinY hold a real position (first move/resize)
 	Frameless   bool `json:"frameless"`   // window mode: window has no OS frame
 	AlwaysOnTop bool `json:"alwaysOnTop"` // window mode: window floats above others
+}
+
+// AudioTrack — фонограмма в медиатеке. Файл лежит на диске (paths.MediaDir),
+// в базе только имя: блоб на 5–80 МБ GORM тянул бы в память целиком при
+// каждом чтении списка — в отличие от Font.Data/Image.Data, которые мелкие.
+// MimeType не заводится: он однозначно выводится из расширения в FileName —
+// у Font/Image он нужен только потому, что они отдаются по HTTP.
+type AudioTrack struct {
+	gorm.Model
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	FileName   string `json:"fileName"` // <hash>.<ext> внутри MediaDir, не полный путь
+	DurationMs int    `json:"durationMs"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	SourcePath string `json:"sourcePath"`        // откуда импортировали: показать оператору и переимпортировать
+	Hash       string `json:"hash" gorm:"index"` // sha256 исходника, первые 16 байт hex; даёт дедупликацию — ищется на каждом импорте
+
+	// Trim и Gain живут на треке, а не на PlaylistItem: тишина в начале
+	// минусовки — свойство файла, она одинакова в любом плейлисте.
+	TrimStartMs int     `json:"trimStartMs"`
+	TrimEndMs   int     `json:"trimEndMs"` // 0 = играть до конца
+	GainDb      float64 `json:"gainDb"`
+}
+
+// Playlist — и служебный список, и «фон до служения»: разница только во
+// флагах, второй сущности не нужно. Shuffle сознательно не заведён — решение
+// пользователя, см. .omc/plans/audio-playlist.md.
+type Playlist struct {
+	gorm.Model
+	Name        string         `json:"name"`
+	AutoAdvance bool           `json:"autoAdvance"`
+	Loop        bool           `json:"loop"`
+	FadeMs      int            `json:"fadeMs"`
+	Items       []PlaylistItem `json:"items"`
+}
+
+type PlaylistItem struct {
+	gorm.Model
+	PlaylistId uint       `json:"playlistId" gorm:"index"` // список плейлиста грузится по этому полю
+	TrackId    uint       `json:"trackId" gorm:"index"`    // RemoveTrack чистит по этому полю
+	Track      AudioTrack `json:"track"`
+	Position   int        `json:"position"` // 1..n, как Couplet.Number
 }

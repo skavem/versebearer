@@ -44,6 +44,9 @@ func init() {
 		&models.Font{},
 		&models.Image{},
 		&models.Output{},
+		&models.AudioTrack{},
+		&models.Playlist{},
+		&models.PlaylistItem{},
 	)
 
 	// Ensure GlobalState row 1 exists
@@ -106,6 +109,16 @@ func init() {
 		})
 		db.Model(&gs).Update("version", "6")
 		gs.Version = "6"
+	}
+
+	// version < 7: GlobalState.AudioVolume получает default:1 в теге GORM, но
+	// AutoMigrate не переписывает существующие строки — на апгрейде колонка
+	// создаётся нулём, а ноль громкости означает тишину при первом открытии
+	// вкладки «Звук».
+	if versionLT(gs.Version, 7) {
+		db.Model(&models.GlobalState{}).Where("audio_volume = ?", 0).Update("audio_volume", 1.0)
+		db.Model(&gs).Update("version", "7")
+		gs.Version = "7"
 	}
 
 	DB = db
