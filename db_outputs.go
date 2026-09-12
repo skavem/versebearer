@@ -96,11 +96,50 @@ func (g *DbHandler) openProjectorWindow(o projectorWindowOptions) application.Wi
 
 	w := app.Window.NewWithOptions(opts)
 
+	g.registerOutputWindowOpened()
 	w.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
+		g.registerOutputWindowClosed()
 		g.emit("screen_closed", o.Name)
 	})
 
 	return w
+}
+
+// registerOutputWindowOpened increments the count of currently-open
+// projector windows and, on the 0→1 transition, calls keepAwake to stop
+// Windows from blanking the displays — otherwise a long-running verse with
+// no mouse/keyboard activity goes dark on the projector mid-service.
+func (g *DbHandler) registerOutputWindowOpened() {
+	g.wakeMu.Lock()
+	defer g.wakeMu.Unlock()
+	g.wakeCount++
+	if g.wakeCount == 1 {
+		fn := g.keepAwakeFn
+		if fn == nil {
+			fn = keepAwake
+		}
+		g.wakeRelease = fn()
+	}
+}
+
+// registerOutputWindowClosed decrements the count and, on the 1→0
+// transition, releases the keep-awake flag — this fires both when the last
+// output window is closed individually (StopOutput/CloseScreen) and when the
+// app is shutting down (main.go closes every non-main window before quitting),
+// so the ES_CONTINUOUS-holding goroutine from keepAwake never outlives the app.
+func (g *DbHandler) registerOutputWindowClosed() {
+	g.wakeMu.Lock()
+	defer g.wakeMu.Unlock()
+	if g.wakeCount == 0 {
+		// Defensive: shouldn't happen (one WindowClosing hook per opened
+		// window), but never go negative.
+		return
+	}
+	g.wakeCount--
+	if g.wakeCount == 0 && g.wakeRelease != nil {
+		g.wakeRelease()
+		g.wakeRelease = nil
+	}
 }
 
 func (g *DbHandler) ShowScreen(x, y, sizeX, sizeY float32, name string, transparent bool) {

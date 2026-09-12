@@ -53,6 +53,7 @@ func main() {
 	})
 
 	dbHandler.app = app
+	dbHandler.keepAwakeFn = keepAwake
 	audioService.app = app
 
 	// Индекс открывается после присваивания app: первичная сборка идёт в

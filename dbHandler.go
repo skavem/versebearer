@@ -140,6 +140,19 @@ type DbHandler struct {
 	// reset on every move/resize event so a drag doesn't hammer SQLite.
 	winSaveMu     sync.Mutex
 	winSaveTimers map[uint]*time.Timer
+
+	// wakeMu guards wakeCount/wakeRelease — the display-keep-awake state
+	// tied to open projector windows (see openProjectorWindow, wake_windows.go
+	// / wake_other.go). wakeCount is the number of currently-open output
+	// windows; wakeRelease is the release func returned by keepAwake while
+	// wakeCount > 0, nil otherwise.
+	wakeMu      sync.Mutex
+	wakeCount   int
+	wakeRelease func()
+	// keepAwakeFn — точка внедрения для тестов (тот же приём, что openDevice
+	// в audio_player.go): nil означает "звать настоящий keepAwake", тесты
+	// подменяют его фейком, который просто считает вызовы.
+	keepAwakeFn func() (release func())
 }
 
 type broadcaster[T any] struct {
