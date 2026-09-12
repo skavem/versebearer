@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/blevesearch/bleve/v2 v2.6.0
 	github.com/blevesearch/bleve_index_api v1.3.11
+	github.com/gopxl/beep/v2 v2.1.1
 	github.com/joho/godotenv v1.5.1
 	github.com/jus1d/gomorphy v0.2.3
 	github.com/kljensen/snowball v0.10.0
@@ -35,15 +36,22 @@ require (
 	github.com/blevesearch/zapx/v17 v17.1.2 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
+	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
+	github.com/icza/bitio v1.1.0 // indirect
+	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
+	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
+	github.com/mewkiz/flac v1.0.12 // indirect
+	github.com/mewkiz/pkg v0.0.0-20230226050401-4010bf0fec14 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 )
 
 require (
-	github.com/adrg/xdg v0.5.3 // indirect
+	github.com/adrg/xdg v0.5.3
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
