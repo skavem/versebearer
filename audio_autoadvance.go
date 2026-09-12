@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"sync/atomic"
 
 	"changeme/backend/inits"
@@ -147,16 +146,9 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 	}
 	a.pl.setNextTitle(next.Track.Title)
 
-	// fadeMs — только если у ЭТОГО подготавливаемого трека (next), когда он
-	// станет играющим, тоже будет куда переходить дальше: план описывает
-	// фейд как "перед автопереходом", а не безусловное затухание в конце
-	// каждого трека (см. тот же расчёт в Play(), audio_service.go) — иначе
-	// последний трек плейлиста (без Loop) тоже уходил бы в фейд, хотя после
-	// него автопереход просто остановится.
-	fadeMs := 0
-	if _, hasNextAfterNext := a.nextPlaylistItem(playlistId, next.ID, playlist.Loop); hasNextAfterNext {
-		fadeMs = playlist.FadeMs
-	}
+	// Фейд считаем для ЭТОГО подготавливаемого трека (next) — на момент,
+	// когда играть будет уже он.
+	fadeMs := a.fadeMsBefore(playlist, next.ID)
 
 	pn := &pendingNext{
 		forItemId:  afterItemId,
@@ -186,6 +178,27 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 	go a.decodePendingNext(pn, next)
 }
 
+// fadeMsBefore — FadeMs плейлиста для трека, который сейчас доигрывает
+// элемент afterItemId. Единственное место, где живёт правило «фейд — только
+// когда есть куда переходить»; его спрашивают оба пути старта трека (Play в
+// audio_service.go и preparePendingNext выше), и разъезжаться этим двум
+// ответам нельзя: цепочка строится по одному, а автопереход — по другому.
+//
+// ⚠️ Ноль, если автопереход выключен или следующего элемента нет: план
+// описывает фейд как "перед автопереходом", а не как безусловное затухание в
+// конце каждого трека — иначе последний трек плейлиста (или единственный
+// трек без AutoAdvance) тоже уходил бы в фейд, хотя после него ничего не
+// звучит.
+func (a *AudioService) fadeMsBefore(playlist models.Playlist, afterItemId uint) int {
+	if !playlist.AutoAdvance {
+		return 0
+	}
+	if _, hasNext := a.nextPlaylistItem(playlist.ID, afterItemId, playlist.Loop); !hasNext {
+		return 0
+	}
+	return playlist.FadeMs
+}
+
 // nextPlaylistItem вычисляет элемент, следующий за afterItemId, в порядке
 // Position ASC. Loop оборачивает после последнего к первому; без Loop конец
 // списка означает "следующего нет". afterItemId, не найденный в списке
@@ -196,14 +209,8 @@ func (a *AudioService) nextPlaylistItem(playlistId, afterItemId uint, loop bool)
 	if err := inits.DB.Preload("Track").Where("playlist_id = ?", playlistId).Order("position ASC").Find(&items).Error; err != nil || len(items) == 0 {
 		return models.PlaylistItem{}, false
 	}
-	idx := -1
-	for i, it := range items {
-		if it.ID == afterItemId {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
+	idx := itemIndex(items, afterItemId)
+	if idx < 0 {
 		return models.PlaylistItem{}, false
 	}
 	if idx+1 < len(items) {
@@ -222,38 +229,35 @@ func (a *AudioService) nextPlaylistItem(playlistId, afterItemId uint, loop bool)
 // уже с преloaded Track (nextPlaylistItem), так что здесь ни одного
 // обращения к БД, только файловый ввод-вывод.
 func (a *AudioService) decodePendingNext(pn *pendingNext, item models.PlaylistItem) {
-	mediaDir, err := paths.MediaDir()
-	var trimStartFrame int
-	if err == nil {
-		var src beep.StreamSeekCloser
-		var format beep.Format
-		src, format, err = decodeExt(filepath.Join(mediaDir, item.Track.FileName), filepath.Ext(item.Track.FileName))
-		if err == nil {
-			// ⚠️ fileSamples, не deviceSamples — та же ловушка, что и в
-			// Play() (audio_service.go): src.Seek() двигает курсор декодера
-			// на его РОДНОЙ частоте, а не частоте устройства.
-			trimStartFrame = fileSamples(item.Track.TrimStartMs, format.SampleRate)
-			if trimStartFrame > 0 {
-				if seekErr := src.Seek(trimStartFrame); seekErr != nil {
-					src.Close()
-					err = seekErr
-				}
-			}
-		}
-		if err == nil {
-			pn.src = src
-			pn.fileRate = format.SampleRate
-			pn.trimStartFileFrame = trimStartFrame
-			pn.totalSamples, pn.fadeSamples = trackChainBounds(item.Track, pn.fadeMs, a.pl.deviceRateSnapshot())
-		}
-	}
-	pn.err = err
+	pn.err = a.fillPendingNext(pn, item.Track)
 
 	if pn.canceled.Load() {
 		pn.closeSrc()
 		pn.src = nil
 	}
 	close(pn.ready)
+}
+
+// fillPendingNext — сама подготовка, отдельно от бухгалтерии готовности
+// (pn.err/canceled/close(ready)) выше: она обязана выполниться при любом
+// исходе, а здесь на каждой неудаче достаточно раннего возврата. На ошибке
+// pn.src остаётся nil, и pn.err расскажет tryAdvance, почему подхватывать
+// нечего.
+func (a *AudioService) fillPendingNext(pn *pendingNext, track models.AudioTrack) error {
+	mediaDir, err := paths.MediaDir()
+	if err != nil {
+		return err
+	}
+	src, format, trimStartFrame, err := openTrackSource(mediaDir, track)
+	if err != nil {
+		return err
+	}
+
+	pn.src = src
+	pn.fileRate = format.SampleRate
+	pn.trimStartFileFrame = trimStartFrame
+	pn.totalSamples, pn.fadeSamples = trackChainBounds(track, pn.fadeMs, a.pl.deviceRateSnapshot())
+	return nil
 }
 
 // tryAdvance подхватывает уже подготовленный pending ровно тогда, когда

@@ -4,6 +4,8 @@
     PlaylistItem,
   } from "$lib/bindings/changeme/backend/models";
   import { audioStore } from "$lib/stores/audioStore.svelte";
+  import { formatDuration } from "$lib/timeFormat";
+  import ConfirmDeleteModal from "./ConfirmDeleteModal.svelte";
   import MuiIcon from "./MuiIcon.svelte";
   import Select from "./Select.svelte";
 
@@ -44,14 +46,6 @@
   // drag-and-drop, без библиотек — план, этап 4).
   let dragItemId = $state<number | null>(null);
 
-  function formatDuration(ms: number): string {
-    if (!ms || ms <= 0) return "—";
-    const totalSec = Math.round(ms / 1000);
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return `${min}:${sec.toString().padStart(2, "0")}`;
-  }
-
   const createPlaylist = async () => {
     const name = newPlaylistName.trim();
     if (!name) return;
@@ -87,14 +81,22 @@
     await audioStore.addToPlaylist(playlist.ID, trackId);
   };
 
+  // isPlayingItem — «этот элемент сейчас загружен в плеер», включая паузу:
+  // кнопка на строке тогда переключает паузу, а не стартует трек заново.
   function isPlayingItem(item: PlaylistItem): boolean {
-    return (
-      !!player && player.status !== "idle" && player.itemId === item.ID
-    );
+    return !!player && player.status !== "idle" && player.itemId === item.ID;
+  }
+
+  // Янтарь = «в эфире» (загруженный трек), синий = клавиатурный выбор —
+  // оператору не спутать «что звучит» с «на чём сейчас стоит курсор».
+  function itemHighlight(item: PlaylistItem): string {
+    if (isPlayingItem(item)) return "border-secondary bg-secondary/10";
+    if (selectedItemId === item.ID) return "border-primary bg-primary/5";
+    return "border-transparent hover:bg-base-200";
   }
 
   async function playItem(playlist: Playlist, item: PlaylistItem) {
-    if (player && player.status !== "idle" && player.itemId === item.ID) {
+    if (isPlayingItem(item)) {
       await audioStore.toggle();
       return;
     }
@@ -292,14 +294,7 @@
               <li
                 class={[
                   "group/item flex items-center gap-2 rounded border-2 p-2",
-                  // Янтарь = «в эфире» (играющий трек), синий = клавиатурный
-                  // выбор — оператору не спутать «что звучит» с «на чём
-                  // сейчас стоит курсор».
-                  isPlayingItem(item)
-                    ? "border-secondary bg-secondary/10"
-                    : selectedItemId === item.ID
-                      ? "border-primary bg-primary/5"
-                      : "border-transparent hover:bg-base-200",
+                  itemHighlight(item),
                 ]}
                 onclick={() => (selectedItemId = item.ID)}
                 ondragover={onDragOver}
@@ -364,45 +359,13 @@
   </div>
 </div>
 
-<svelte:window
-  onkeydown={(e) =>
-    playlistToDelete && e.key === "Escape" && (playlistToDelete = null)}
-/>
-
 {#if playlistToDelete}
-  <div class="modal modal-open">
-    <div class="modal-box">
-      <div class="mb-2 flex items-center gap-3">
-        <div
-          class="flex h-10 w-10 items-center justify-center rounded-full bg-error/10 text-error"
-        >
-          <MuiIcon name="delete" />
-        </div>
-        <h3 class="text-lg font-bold">Удалить плейлист?</h3>
-      </div>
-
-      <p class="py-2">
-        <span class="font-semibold">«{playlistToDelete.name}»</span> будет удалён
-        безвозвратно вместе со списком треков (сами фонограммы останутся в медиатеке).
-      </p>
-
-      <div class="modal-action">
-        <button
-          class="btn btn-ghost"
-          onclick={() => (playlistToDelete = null)}
-        >
-          Отмена
-        </button>
-        <button class="btn btn-error" onclick={confirmDelete}>
-          <MuiIcon name="delete" />
-          Удалить
-        </button>
-      </div>
-    </div>
-    <button
-      class="modal-backdrop"
-      onclick={() => (playlistToDelete = null)}
-      aria-label="Закрыть"
-    ></button>
-  </div>
+  <ConfirmDeleteModal
+    title="Удалить плейлист?"
+    onConfirm={confirmDelete}
+    onCancel={() => (playlistToDelete = null)}
+  >
+    <span class="font-semibold">«{playlistToDelete.name}»</span> будет удалён
+    безвозвратно вместе со списком треков (сами фонограммы останутся в медиатеке).
+  </ConfirmDeleteModal>
 {/if}

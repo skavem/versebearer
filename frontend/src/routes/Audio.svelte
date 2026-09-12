@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AudioTrack } from "$lib/bindings/changeme/backend/models";
   import AudioDeviceSelect from "$lib/components/AudioDeviceSelect.svelte";
+  import ConfirmDeleteModal from "$lib/components/ConfirmDeleteModal.svelte";
   import EditTrackModal from "$lib/components/EditTrackModal.svelte";
   import List from "$lib/components/List.svelte";
   import MiniPlayer from "$lib/components/MiniPlayer.svelte";
@@ -8,6 +9,7 @@
   import PlaylistPanel from "$lib/components/PlaylistPanel.svelte";
   import { isTypingTarget } from "$lib/keyboard";
   import { audioStore } from "$lib/stores/audioStore.svelte";
+  import { formatDuration } from "$lib/timeFormat";
 
   const tracks = $derived(audioStore.tracks);
 
@@ -50,12 +52,14 @@
     const items = playlist?.items ?? [];
     if (!playlist || items.length === 0) return;
     const idx = items.findIndex((i) => i.ID === selectedPlaylistItemId);
-    const next =
-      idx === -1
-        ? delta > 0
-          ? 0
-          : items.length - 1
-        : Math.min(items.length - 1, Math.max(0, idx + delta));
+    // Ничего ещё не выбрано — заходим в список с того края, откуда идём:
+    // вниз с первого элемента, вверх с последнего.
+    let next: number;
+    if (idx === -1) {
+      next = delta > 0 ? 0 : items.length - 1;
+    } else {
+      next = Math.min(items.length - 1, Math.max(0, idx + delta));
+    }
     selectedPlaylistItemId = items[next].ID;
   }
 
@@ -157,14 +161,6 @@
     audioStore.startPolling();
     return () => audioStore.stopPolling();
   });
-
-  function formatDuration(ms: number): string {
-    if (!ms || ms <= 0) return "—";
-    const totalSec = Math.round(ms / 1000);
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return `${min}:${sec.toString().padStart(2, "0")}`;
-  }
 
   function formatSize(bytes: number): string {
     if (!bytes) return "";
@@ -325,42 +321,13 @@
 
 <EditTrackModal bind:track={editingTrack} />
 
-<svelte:window
-  onkeydown={(e) =>
-    trackToDelete && e.key === "Escape" && (trackToDelete = null)}
-/>
-
 {#if trackToDelete}
-  <div class="modal modal-open">
-    <div class="modal-box">
-      <div class="mb-2 flex items-center gap-3">
-        <div
-          class="flex h-10 w-10 items-center justify-center rounded-full bg-error/10 text-error"
-        >
-          <MuiIcon name="delete" />
-        </div>
-        <h3 class="text-lg font-bold">Удалить фонограмму?</h3>
-      </div>
-
-      <p class="py-2">
-        <span class="font-semibold">«{trackToDelete.title}»</span> будет удалена
-        безвозвратно вместе с файлом.
-      </p>
-
-      <div class="modal-action">
-        <button class="btn btn-ghost" onclick={() => (trackToDelete = null)}>
-          Отмена
-        </button>
-        <button class="btn btn-error" onclick={confirmDelete}>
-          <MuiIcon name="delete" />
-          Удалить
-        </button>
-      </div>
-    </div>
-    <button
-      class="modal-backdrop"
-      onclick={() => (trackToDelete = null)}
-      aria-label="Закрыть"
-    ></button>
-  </div>
+  <ConfirmDeleteModal
+    title="Удалить фонограмму?"
+    onConfirm={confirmDelete}
+    onCancel={() => (trackToDelete = null)}
+  >
+    <span class="font-semibold">«{trackToDelete.title}»</span> будет удалена
+    безвозвратно вместе с файлом.
+  </ConfirmDeleteModal>
 {/if}

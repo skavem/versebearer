@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -256,6 +255,31 @@ func trackChainBounds(track models.AudioTrack, fadeMs int, devRate beep.SampleRa
 	return totalSamples, fadeSamples
 }
 
+// openTrackSource открывает файл трека из медиатеки и сразу ставит курсор
+// декодера на TrimStartMs. Общее начало двух путей старта трека — Play()
+// (ниже) и подготовки следующего элемента автоперехода (decodePendingNext,
+// audio_autoadvance.go): открывают они файл одинаково, и ловушку ниже
+// достаточно держать в одном месте, а не помнить про неё в каждом.
+//
+// ⚠️ fileSamples, не deviceSamples: src.Seek() двигает курсор ДЕКОДЕРА,
+// который читает файл на его РОДНОЙ частоте, — главная ловушка этапа 5.
+//
+// При любой ошибке src уже закрыт здесь: вызывающему остаётся вернуть err.
+func openTrackSource(mediaDir string, track models.AudioTrack) (src beep.StreamSeekCloser, format beep.Format, trimStartFrame int, err error) {
+	src, format, err = decodeExt(filepath.Join(mediaDir, track.FileName), filepath.Ext(track.FileName))
+	if err != nil {
+		return nil, beep.Format{}, 0, fmt.Errorf("не удалось открыть файл %q: %w", track.FileName, err)
+	}
+	trimStartFrame = fileSamples(track.TrimStartMs, format.SampleRate)
+	if trimStartFrame > 0 {
+		if err := src.Seek(trimStartFrame); err != nil {
+			src.Close()
+			return nil, beep.Format{}, 0, fmt.Errorf("не удалось обрезать начало %q: %w", track.FileName, err)
+		}
+	}
+	return src, format, trimStartFrame, nil
+}
+
 // Play начинает воспроизведение элемента плейлиста itemId. Повторный Play
 // на уже играющий itemId — no-op, не рестарт (И5): оператор, дважды
 // кликнувший по строке, не должен услышать, как трек начался заново.
@@ -287,22 +311,12 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	// FadeMs плейлиста нужен уже сейчас, а не по приходу done (этап 5,
 	// buildChain): фейд-аут перед автопереходом строится в цепочку сразу при
 	// старте трека. Отсутствие плейлиста (не должно случаться, но не повод
-	// падать) — fadeMs=0, как если бы фейд не был настроен.
-	//
-	// ⚠️ Фейд применяется, ТОЛЬКО если у AutoAdvance действительно есть куда
-	// переходить (см. nextPlaylistItem, тот же расчёт, что чуть ниже сделает
-	// preparePendingNext): план описывает фейд как "перед автопереходом", а
-	// не как безусловное затухание в конце каждого трека — иначе последний
-	// трек плейлиста (или единственный трек без AutoAdvance) тоже уходил бы
-	// в фейд, хотя после него ничего не звучит.
+	// падать) — fadeMs=0, как если бы фейд не был настроен. Правило «фейд
+	// только когда есть куда переходить» — в fadeMsBefore.
 	fadeMs := 0
 	var playlist models.Playlist
 	if err := inits.DB.First(&playlist, playlistId).Error; err == nil {
-		if playlist.AutoAdvance {
-			if _, hasNext := a.nextPlaylistItem(playlistId, itemId, playlist.Loop); hasNext {
-				fadeMs = playlist.FadeMs
-			}
-		}
+		fadeMs = a.fadeMsBefore(playlist, itemId)
 	}
 
 	// Резервируем поколение ДО дорогой сборки цепочки (И4): любой
@@ -310,19 +324,9 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	// должен суметь его отменить через несовпадение gen в startTrack.
 	gen := a.pl.nextGen()
 
-	src, format, err := decodeExt(filepath.Join(mediaDir, track.FileName), filepath.Ext(track.FileName))
+	src, format, trimStartFrame, err := openTrackSource(mediaDir, track)
 	if err != nil {
-		return fmt.Errorf("не удалось открыть файл %q: %w", track.FileName, err)
-	}
-
-	// ⚠️ fileSamples, не deviceSamples: src.Seek() двигает курсор ДЕКОДЕРА,
-	// который читает файл на его РОДНОЙ частоте — главная ловушка этапа 5.
-	trimStartFrame := fileSamples(track.TrimStartMs, format.SampleRate)
-	if trimStartFrame > 0 {
-		if err := src.Seek(trimStartFrame); err != nil {
-			src.Close()
-			return fmt.Errorf("не удалось обрезать начало %q: %w", track.FileName, err)
-		}
+		return err
 	}
 
 	devRate := a.pl.deviceRateSnapshot()
@@ -544,144 +548,3 @@ func (a *AudioService) SetVolume(v float64) {
 	})
 }
 
-// ListTracks возвращает медиатеку фонограмм. Ошибку БД не глотает молча:
-// без события «пустая медиатека» из-за сбоя чтения выглядела бы для
-// оператора неотличимо от действительно пустой — с 40 треками он решил бы,
-// что всё удалилось, и начал бы импортировать их заново.
-func (a *AudioService) ListTracks() []models.AudioTrack {
-	var tracks []models.AudioTrack
-	if err := inits.DB.Order("id ASC").Find(&tracks).Error; err != nil {
-		log.Println("ListTracks: error", err)
-		a.emit("audio_error", fmt.Sprintf("не удалось прочитать медиатеку: %s", err.Error()))
-		return nil
-	}
-	return tracks
-}
-
-// TrackInput — поля указателями: незаданное поле остаётся нетронутым, как
-// StyleInput в dbHandler.go.
-type TrackInput struct {
-	Title       *string  `json:"title"`
-	Artist      *string  `json:"artist"`
-	TrimStartMs *int     `json:"trimStartMs"`
-	TrimEndMs   *int     `json:"trimEndMs"`
-	GainDb      *float64 `json:"gainDb"`
-}
-
-// UpdateTrack правит метаданные трека (название, исполнитель, trim, ручная
-// поправка громкости) и возвращает обновлённую запись. Ошибка записи
-// возвращается вызывающему явно — раньше она уходила только в log.Println, и
-// оператор видел молчаливый откат правки в UI без единого слова объяснения.
-func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.AudioTrack, error) {
-	id := uint(idF)
-
-	var track models.AudioTrack
-	if err := inits.DB.First(&track, id).Error; err != nil {
-		return nil, fmt.Errorf("трек не найден: %w", err)
-	}
-
-	updates := map[string]any{}
-	if input.Title != nil {
-		updates["title"] = *input.Title
-	}
-	if input.Artist != nil {
-		updates["artist"] = *input.Artist
-	}
-	// trimStart/trimEnd — итоговые значения ПОСЛЕ применения патча (частичный
-	// TrackInput мог прислать только одно из двух полей): валидировать нужно
-	// результат, а не изменённое поле само по себе, иначе патч, меняющий
-	// только TrimStartMs, мог бы молча образовать невалидную пару со старым
-	// TrimEndMs.
-	trimStart, trimEnd := track.TrimStartMs, track.TrimEndMs
-	if input.TrimStartMs != nil {
-		trimStart = *input.TrimStartMs
-		updates["trim_start_ms"] = trimStart
-	}
-	if input.TrimEndMs != nil {
-		trimEnd = *input.TrimEndMs
-		updates["trim_end_ms"] = trimEnd
-	}
-	// TrimEndMs==0 значит "до конца файла" (models.AudioTrack) — границы нет,
-	// проверять нечего. Иначе конец обязан быть строго после начала: end<=start
-	// даёт trimmedDurationMs()==0 -> beep.Take(0) -> трек не звучит и мгновенно
-	// отдаёт done — с AutoAdvance+Loop плейлист пролетит по кругу за секунду.
-	// Источник истины — здесь (защищает от любого вызывающего); фронт
-	// (EditTrackModal) дублирует ту же проверку только для мгновенной
-	// обратной связи до сохранения.
-	if trimEnd > 0 && trimEnd <= trimStart {
-		return nil, fmt.Errorf("конец обрезки должен быть позже начала")
-	}
-	if input.GainDb != nil {
-		updates["gain_db"] = *input.GainDb
-	}
-	if len(updates) > 0 {
-		if err := inits.DB.Model(&models.AudioTrack{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-			return nil, fmt.Errorf("не удалось сохранить изменения: %w", err)
-		}
-	}
-	if err := inits.DB.First(&track, id).Error; err != nil {
-		return nil, fmt.Errorf("трек не найден: %w", err)
-	}
-
-	// Правка trim/gain могла сделать неверным уже подготовленный "следующий"
-	// трек автоперехода (этап 4): pending декодирован и посчитан
-	// (totalSamples/fadeSamples/trimStartFileFrame) со старыми значениями —
-	// без инвалидации автопереход поставил бы устаревшую версию правки.
-	if a.pl != nil {
-		a.invalidatePendingForTrack(id)
-	}
-
-	a.emit("audio_tracks_update", a.ListTracks())
-	return &track, nil
-}
-
-// RemoveTrack удаляет трек: сперва останавливает воспроизведение, если это
-// именно он сейчас загружен (играет или на паузе), затем ссылки на него из
-// плейлистов, затем файл, затем строку.
-//
-// ⚠️ os.Remove на Windows падает с ошибкой sharing violation, пока файл
-// держит открытый декодер — поэтому Stop() здесь синхронный (дожидается
-// src.Close()), а не просто сигнал. Без этого: os.Remove молча не удался бы
-// (см. log.Println ниже — не виден в production, build/AGENTS.md:32), строка
-// всё равно удалилась бы из БД, а трек продолжал бы звучать — и остановить
-// его было бы уже нечем, в медиатеке его больше нет.
-// Если os.Remove всё же не удался, строку удаляем всё равно: файл-сирота на
-// диске безопаснее фантомной записи в медиатеке, а имя по хешу означает, что
-// повторный импорт того же файла его переиспользует.
-func (a *AudioService) RemoveTrack(idF float32) error {
-	id := uint(idF)
-	var track models.AudioTrack
-	if err := inits.DB.First(&track, id).Error; err != nil {
-		return err
-	}
-
-	// a.pl может быть nil в тестах, которые конструируют AudioService{} без
-	// NewAudioService (им движок не нужен) — RemoveTrack тогда просто
-	// пропускает шаг остановки, звука ни в одном таком тесте не бывает.
-	if a.pl != nil {
-		if a.pl.isCurrentTrack(id) {
-			a.Stop()
-		}
-		// Трек мог быть не текущим, а уже заранее открытым "следующим"
-		// (этап 4, автопереход) — тот же sharing-violation риск на Windows,
-		// только для decodeExt внутри buildPendingNext, а не Play.
-		a.invalidatePendingForTrack(id)
-	}
-
-	if err := inits.DB.Where("track_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
-		log.Println("RemoveTrack: error clearing playlist items", err)
-	}
-
-	if mediaDir, err := paths.MediaDir(); err == nil && track.FileName != "" {
-		if err := os.Remove(filepath.Join(mediaDir, track.FileName)); err != nil && !os.IsNotExist(err) {
-			log.Println("RemoveTrack: error deleting file", err)
-		}
-	}
-
-	if err := inits.DB.Delete(&models.AudioTrack{}, id).Error; err != nil {
-		return err
-	}
-
-	a.emit("audio_tracks_update", a.ListTracks())
-	return nil
-}

@@ -256,40 +256,48 @@ func (a *AudioService) ReorderPlaylist(playlistIdF float32, itemIds []uint) *mod
 	return playlist
 }
 
+// itemIndex — позиция элемента itemId в уже упорядоченном (Position ASC)
+// списке, или -1, если его там нет. Одинаково нужна и автопереходу
+// (nextPlaylistItem), и ручной навигации (step ниже); оба одинаково трактуют
+// -1 как «элемент удалён или переставлен в другой плейлист между вызовами» и
+// не пытаются угадывать позицию по устаревшим данным.
+func itemIndex(items []models.PlaylistItem, itemId uint) int {
+	for i, it := range items {
+		if it.ID == itemId {
+			return i
+		}
+	}
+	return -1
+}
+
 // step — общая реализация Next/Prev: находит текущий элемент в его плейлисте
 // и запускает соседний по позиции, с оборачиванием по Loop. Работает
 // независимо от AutoAdvance — это ручная навигация оператора, а не
 // автоматика.
+//
+// playlistId берётся у самого плеера (currentItem), а не перечитывается из
+// строки элемента: элемент не переезжает между плейлистами, так что второй
+// источник той же правды был бы лишним запросом с собственным путём отказа.
 func (a *AudioService) step(dir int) error {
 	if a.pl == nil {
 		return fmt.Errorf("плеер недоступен")
 	}
-	_, itemId, ok := a.pl.currentItem()
+	playlistId, itemId, ok := a.pl.currentItem()
 	if !ok {
 		return fmt.Errorf("ничего не играет")
 	}
 
-	var item models.PlaylistItem
-	if err := inits.DB.First(&item, itemId).Error; err != nil {
-		return fmt.Errorf("текущий элемент не найден: %w", err)
-	}
 	var playlist models.Playlist
-	if err := inits.DB.First(&playlist, item.PlaylistId).Error; err != nil {
+	if err := inits.DB.First(&playlist, playlistId).Error; err != nil {
 		return fmt.Errorf("плейлист не найден: %w", err)
 	}
 	var items []models.PlaylistItem
-	if err := inits.DB.Where("playlist_id = ?", item.PlaylistId).Order("position ASC").Find(&items).Error; err != nil || len(items) == 0 {
+	if err := inits.DB.Where("playlist_id = ?", playlistId).Order("position ASC").Find(&items).Error; err != nil || len(items) == 0 {
 		return fmt.Errorf("не удалось прочитать плейлист")
 	}
 
-	idx := -1
-	for i, it := range items {
-		if it.ID == itemId {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
+	idx := itemIndex(items, itemId)
+	if idx < 0 {
 		return fmt.Errorf("текущий элемент больше не в плейлисте")
 	}
 
@@ -307,7 +315,7 @@ func (a *AudioService) step(dir int) error {
 		target = 0
 	}
 
-	return a.Play(float32(item.PlaylistId), float32(items[target].ID))
+	return a.Play(float32(playlistId), float32(items[target].ID))
 }
 
 func (a *AudioService) Next() error {

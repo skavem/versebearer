@@ -5,6 +5,7 @@
   // только управление уже загруженным: пауза/резюме, перемотка, громкость,
   // стоп с фейдом и индикатор уровня.
   import { audioStore } from "$lib/stores/audioStore.svelte";
+  import { formatMinSec } from "$lib/timeFormat";
   import MuiIcon from "./MuiIcon.svelte";
 
   const player = $derived(audioStore.player.state);
@@ -28,13 +29,6 @@
   const remainingSoon = $derived(
     !isIdle && remainingMs > 0 && remainingMs <= 10_000,
   );
-
-  function formatTime(ms: number): string {
-    const totalSec = Math.max(0, Math.round(ms / 1000));
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return `${min}:${sec.toString().padStart(2, "0")}`;
-  }
 
   function onSeekInput(e: Event & { currentTarget: HTMLInputElement }) {
     seekDraft = Number(e.currentTarget.value);
@@ -152,7 +146,7 @@
 
   <div class="flex items-center gap-2">
     <span class="w-10 shrink-0 text-right font-mono text-xs opacity-70"
-      >{formatTime(shownPositionMs)}</span
+      >{formatMinSec(shownPositionMs)}</span
     >
     <input
       type="range"
@@ -172,7 +166,7 @@
         remainingSoon ? "font-semibold text-error" : "opacity-70",
       ]}
     >
-      -{formatTime(remainingMs)}
+      -{formatMinSec(remainingMs)}
     </span>
   </div>
 

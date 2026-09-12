@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AudioTrack } from "$lib/bindings/changeme/backend/models";
   import { audioStore } from "$lib/stores/audioStore.svelte";
+  import { formatMinSec } from "$lib/timeFormat";
   import MuiIcon from "./MuiIcon.svelte";
 
   let { track = $bindable(null) }: { track: AudioTrack | null } = $props();
@@ -32,16 +33,10 @@
     }
   });
 
-  // "м:сс" — план, этап 5: оператор задаёт границы обрезки на слух, секунды
-  // от начала файла удобнее читать и печатать, чем сырые миллисекунды.
-  function msToMinSec(ms: number): string {
-    if (!ms || ms <= 0) return "0:00";
-    const totalSec = Math.round(ms / 1000);
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return `${min}:${sec.toString().padStart(2, "0")}`;
-  }
-
+  // Границы обрезки оператор задаёт на слух, поэтому поля — в "м:сс"
+  // (formatMinSec, $lib/timeFormat), а не в сырых миллисекундах (план,
+  // этап 5). Обратный разбор — здесь же, рядом с полями, которые его ждут.
+  //
   // Принимает "м:сс" И просто "сс" (сырые секунды без минут — оператору
   // проще ввести "15", чем "0:15"). null — вход не разобран: вызывающий
   // обязан показать ошибку и НЕ подменять текущее значение на 0 (см.
@@ -65,7 +60,7 @@
     const parsed = minSecToMs(e.currentTarget.value);
     if (parsed === null) {
       trimStartError = "Формат: м:сс или секунды";
-      e.currentTarget.value = msToMinSec(trimStartMs); // не даём неверному тексту зависнуть в поле
+      e.currentTarget.value = formatMinSec(trimStartMs); // не даём неверному тексту зависнуть в поле
       return;
     }
     trimStartError = "";
@@ -76,7 +71,7 @@
     const parsed = minSecToMs(e.currentTarget.value);
     if (parsed === null) {
       trimEndError = "Формат: м:сс или секунды";
-      e.currentTarget.value = msToMinSec(trimEndMs);
+      e.currentTarget.value = formatMinSec(trimEndMs);
       return;
     }
     trimEndError = "";
@@ -172,7 +167,7 @@
             <div class="join w-full">
               <input
                 type="text"
-                value={msToMinSec(trimStartMs)}
+                value={formatMinSec(trimStartMs)}
                 onchange={onTrimStartChange}
                 placeholder="0:00"
                 class="input input-sm input-bordered join-item w-full"
@@ -202,7 +197,7 @@
             <div class="join w-full">
               <input
                 type="text"
-                value={msToMinSec(trimEndMs)}
+                value={formatMinSec(trimEndMs)}
                 onchange={onTrimEndChange}
                 placeholder="0:00"
                 class="input input-sm input-bordered join-item w-full"
