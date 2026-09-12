@@ -35,11 +35,14 @@ func main() {
 	}
 	go createSSE(bibleChannel, songChannel, qrChannel, styleChannel, inits.DB)
 
+	audioService := NewAudioService()
+
 	app := application.New(application.Options{
 		Name:        "versebearer",
 		Description: "Show Bible verses and christian songs",
 		Services: []application.Service{
 			application.NewService(&dbHandler),
+			application.NewService(audioService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -50,6 +53,7 @@ func main() {
 	})
 
 	dbHandler.app = app
+	audioService.app = app
 
 	// Индекс открывается после присваивания app: первичная сборка идёт в
 	// горутине и рапортует о прогрессе событиями, а до этой строки emit
