@@ -96,24 +96,39 @@ func (g *DbHandler) openProjectorWindow(o projectorWindowOptions) application.Wi
 
 	w := app.Window.NewWithOptions(opts)
 
-	g.registerOutputWindowOpened()
+	g.registerOutputWindowOpened(o.Name)
 	w.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
-		g.registerOutputWindowClosed()
+		g.registerOutputWindowClosed(o.Name)
 		g.emit("screen_closed", o.Name)
 	})
 
 	return w
 }
 
-// registerOutputWindowOpened increments the count of currently-open
-// projector windows and, on the 0→1 transition, calls keepAwake to stop
-// Windows from blanking the displays — otherwise a long-running verse with
-// no mouse/keyboard activity goes dark on the projector mid-service.
-func (g *DbHandler) registerOutputWindowOpened() {
+// registerOutputWindowOpened adds name to the set of currently-open
+// projector windows and, on the empty→non-empty transition, calls keepAwake
+// to stop Windows from blanking the displays — otherwise a long-running
+// verse with no mouse/keyboard activity goes dark on the projector
+// mid-service.
+//
+// Keyed by window name rather than a plain per-call counter: a duplicate
+// StartOutput/ShowScreen for the SAME name (double click, or called again
+// before the previous window with that name closed) only ever fires ONE
+// WindowClosing for that name going forward — a counter incremented on every
+// call would then never come back down to zero, and the displays would never
+// be allowed to blank again until restart. A set collapses the duplicate
+// registration instead.
+func (g *DbHandler) registerOutputWindowOpened(name string) {
 	g.wakeMu.Lock()
 	defer g.wakeMu.Unlock()
-	g.wakeCount++
-	if g.wakeCount == 1 {
+	if g.wakeOpenWindows == nil {
+		g.wakeOpenWindows = map[string]struct{}{}
+	}
+	if _, already := g.wakeOpenWindows[name]; already {
+		return
+	}
+	g.wakeOpenWindows[name] = struct{}{}
+	if len(g.wakeOpenWindows) == 1 {
 		fn := g.keepAwakeFn
 		if fn == nil {
 			fn = keepAwake
@@ -122,21 +137,22 @@ func (g *DbHandler) registerOutputWindowOpened() {
 	}
 }
 
-// registerOutputWindowClosed decrements the count and, on the 1→0
-// transition, releases the keep-awake flag — this fires both when the last
-// output window is closed individually (StopOutput/CloseScreen) and when the
-// app is shutting down (main.go closes every non-main window before quitting),
-// so the ES_CONTINUOUS-holding goroutine from keepAwake never outlives the app.
-func (g *DbHandler) registerOutputWindowClosed() {
+// registerOutputWindowClosed removes name from the set and, on the
+// non-empty→empty transition, releases the keep-awake flag — this fires both
+// when the last output window is closed individually (StopOutput/CloseScreen)
+// and when the app is shutting down (main.go closes every non-main window
+// before quitting), so the ES_CONTINUOUS-holding goroutine from keepAwake
+// never outlives the app.
+func (g *DbHandler) registerOutputWindowClosed(name string) {
 	g.wakeMu.Lock()
 	defer g.wakeMu.Unlock()
-	if g.wakeCount == 0 {
+	if _, ok := g.wakeOpenWindows[name]; !ok {
 		// Defensive: shouldn't happen (one WindowClosing hook per opened
-		// window), but never go negative.
+		// window/name), but never release a keep-awake we don't hold.
 		return
 	}
-	g.wakeCount--
-	if g.wakeCount == 0 && g.wakeRelease != nil {
+	delete(g.wakeOpenWindows, name)
+	if len(g.wakeOpenWindows) == 0 && g.wakeRelease != nil {
 		g.wakeRelease()
 		g.wakeRelease = nil
 	}

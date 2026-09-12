@@ -248,3 +248,156 @@ func TestFadeOutStopStopsPlayback(t *testing.T) {
 
 	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusIdle) })
 }
+
+// TestFadeOutStopTwiceStopsHard — ревью (MEDIUM №4): второе "Стоп с фейдом"
+// подряд, пока первый фейд ещё играет, обязано остановить сразу (жёсткий
+// Stop()), а не пересобрать фейд-цепочку заново с startGain=1 — иначе на
+// мгновение поднимало бы громкость обратно и начинало фейд с нуля. FadeMs
+// выбран заведомо длиннее, чем успеет отдренироваться между двумя вызовами.
+func TestFadeOutStopTwiceStopsHard(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	src := filepath.Join(t.TempDir(), "fade2.wav")
+	writeTestWav(t, src, 5.0)
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+
+	playlist := models.Playlist{Name: "Фейд2", FadeMs: 60_000} // заведомо дольше теста
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: res.Track.ID, Position: 1}
+	if err := inits.DB.Create(&item).Error; err != nil {
+		t.Fatalf("create playlist item: %v", err)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusPlaying) })
+
+	a.FadeOutStop()
+	if !a.pl.fadingOut.Load() {
+		t.Fatal("после первого FadeOutStop() ожидался fadingOut=true")
+	}
+
+	a.FadeOutStop() // второй подряд — обязан остановить сразу, а не пересобрать фейд
+
+	st := a.State()
+	if st.Status != string(statusIdle) {
+		t.Fatalf("status после второго FadeOutStop() = %q, want %q (жёсткий Stop)", st.Status, statusIdle)
+	}
+}
+
+// TestFadeOutStopWhilePausedStops — ревью (MEDIUM №5): "Стоп с фейдом" на
+// приостановленном треке обязан делегировать в Stop(), а не поставить фейд-
+// цепочку поверх приостановленного beep.Ctrl — тот не продвинет её никогда
+// (Ctrl.Paused пропускает Stream целиком), done не придёт, и плеер навсегда
+// повис бы на паузе с "фейднутым" в памяти треком.
+func TestFadeOutStopWhilePausedStops(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	src := filepath.Join(t.TempDir(), "fadepause.wav")
+	writeTestWav(t, src, 2.0)
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+
+	playlist := models.Playlist{Name: "ФейдПауза", FadeMs: 200}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: res.Track.ID, Position: 1}
+	if err := inits.DB.Create(&item).Error; err != nil {
+		t.Fatalf("create playlist item: %v", err)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusPlaying) })
+
+	a.Toggle() // пауза
+	if st := a.State(); st.Status != string(statusPaused) {
+		t.Fatalf("status после Toggle() = %q, want %q", st.Status, statusPaused)
+	}
+
+	a.FadeOutStop()
+
+	if st := a.State(); st.Status != string(statusIdle) {
+		t.Fatalf("status после FadeOutStop() на паузе = %q, want %q — плеер должен остановиться, а не зависнуть на паузе", st.Status, statusIdle)
+	}
+}
+
+// TestInvalidatePendingClosesDecoderOnStopSetDeviceShutdown — план явно
+// предупреждает про риск утечки файлового хендлера заранее подготовленного
+// "следующего" трека (этап 4, decodePendingNext), если Stop/SetDevice/
+// ServiceShutdown не закрывают его декодер — ни один прежний тест этого не
+// проверял. pendingNext собран вручную с уже закрытым ready ("подготовка уже
+// завершена"), без похода в БД/файлы — И6.
+func TestInvalidatePendingClosesDecoderOnStopSetDeviceShutdown(t *testing.T) {
+	newFakePending := func() (*pendingNext, *bool) {
+		closed := false
+		pn := &pendingNext{
+			itemId:     1,
+			trackId:    1,
+			playlistId: 1,
+			ready:      make(chan struct{}),
+			src:        &fakeSeekCloser{onClose: func() { closed = true }},
+		}
+		close(pn.ready)
+		return pn, &closed
+	}
+
+	t.Run("Stop", func(t *testing.T) {
+		p := newPlayer(1.0, "")
+		a := &AudioService{pl: p}
+		pn, closed := newFakePending()
+		a.pending = pn
+
+		a.Stop()
+
+		if !*closed {
+			t.Error("Stop() не закрыл декодер заранее подготовленного следующего трека — утечка файлового хендлера")
+		}
+	})
+
+	t.Run("SetDevice", func(t *testing.T) {
+		setupPlayerTestDB(t)
+		p := newPlayer(1.0, "")
+		p.openDevice = fakeOpenDevice(44100)
+		a := &AudioService{pl: p}
+		pn, closed := newFakePending()
+		a.pending = pn
+
+		if err := a.SetDevice(""); err != nil {
+			t.Fatalf("SetDevice: %v", err)
+		}
+
+		if !*closed {
+			t.Error("SetDevice() не закрыл декодер заранее подготовленного следующего трека — утечка файлового хендлера")
+		}
+	})
+
+	t.Run("ServiceShutdown", func(t *testing.T) {
+		p := newPlayer(1.0, "")
+		a := &AudioService{pl: p, quit: make(chan struct{})}
+		pn, closed := newFakePending()
+		a.pending = pn
+
+		if err := a.ServiceShutdown(); err != nil {
+			t.Fatalf("ServiceShutdown: %v", err)
+		}
+
+		if !*closed {
+			t.Error("ServiceShutdown() не закрыл декодер заранее подготовленного следующего трека — утечка файлового хендлера")
+		}
+	})
+}

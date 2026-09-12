@@ -147,6 +147,17 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 	}
 	a.pl.setNextTitle(next.Track.Title)
 
+	// fadeMs — только если у ЭТОГО подготавливаемого трека (next), когда он
+	// станет играющим, тоже будет куда переходить дальше: план описывает
+	// фейд как "перед автопереходом", а не безусловное затухание в конце
+	// каждого трека (см. тот же расчёт в Play(), audio_service.go) — иначе
+	// последний трек плейлиста (без Loop) тоже уходил бы в фейд, хотя после
+	// него автопереход просто остановится.
+	fadeMs := 0
+	if _, hasNextAfterNext := a.nextPlaylistItem(playlistId, next.ID, playlist.Loop); hasNextAfterNext {
+		fadeMs = playlist.FadeMs
+	}
+
 	pn := &pendingNext{
 		forItemId:  afterItemId,
 		itemId:     next.ID,
@@ -155,7 +166,7 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 		ready:      make(chan struct{}),
 		gainDb:     next.Track.GainDb,
 		durationMs: trimmedDurationMs(next.Track), // этап 5: UI считает от TrimStartMs
-		fadeMs:     playlist.FadeMs,
+		fadeMs:     fadeMs,
 	}
 
 	// Более старый pending (если preparePendingNext почему-то вызвали дважды

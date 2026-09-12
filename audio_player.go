@@ -147,6 +147,16 @@ type player struct {
 	done       chan uint64 // "трек доиграл": несёт поколение, см. И4. Буфер 1 — в канале максимум одно событие
 	lost       chan struct{}
 	expectStop atomic.Bool // отличает наш Stop()/ServiceShutdown() от пропажи устройства (этап 3)
+
+	// fadingOut — FadeOutStop уже построил и поставил в микшер фейд-цепочку
+	// для текущего трека. Второй "Стоп с фейдом" подряд обязан сделать
+	// жёсткий Stop() сразу, а не пересобрать цепочку заново с startGain=1 —
+	// buildChain/resumeChain всегда строят НЕЗАВИСИМЫЙ effects.Transition,
+	// то есть повторное нажатие иначе на мгновение поднимало бы громкость
+	// обратно и начинало фейд с нуля. Сбрасывается в resetTrackFieldsLocked
+	// (stop/finishIfCurrent/forceIdleOnDeviceLost/abandonFailedSeek) и в
+	// startTrack — обе точки "начался обычный, не фейдящий трек".
+	fadingOut atomic.Bool
 }
 
 type playerStatus string
@@ -238,6 +248,17 @@ func (p *player) isCurrentItem(itemId uint) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.status != statusIdle && p.itemId == itemId
+}
+
+// isPaused — FadeOutStop обязан отличать паузу от воспроизведения: цепочка
+// фейда, построенная поверх приостановленного beep.Ctrl (Paused=true),
+// никогда не продвинется — beep.Ctrl полностью пропускает вызов обёрнутого
+// Streamer.Stream, пока приостановлен, — done не придёт, и оператор
+// навсегда останется на паузе с уже "фейднутым" в памяти треком.
+func (p *player) isPaused() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status == statusPaused
 }
 
 // isCurrentPlaylist — RemovePlaylist/ReorderPlaylist: остановить, если сейчас
@@ -353,6 +374,7 @@ func (p *player) resetTrackFieldsLocked() {
 	p.ctrl.Paused = false
 	p.pos.Store(0)
 	p.peak.Store(0)
+	p.fadingOut.Store(false)
 }
 
 // fileSamples переводит миллисекунды в сэмплы ФАЙЛА при заданной частоте
@@ -499,6 +521,7 @@ func (p *player) startTrack(gen uint64, chain beep.Streamer, src beep.StreamSeek
 	p.ctrl.Paused = false
 	p.pos.Store(0)
 	p.peak.Store(0)
+	p.fadingOut.Store(false) // новый трек начинается обычным, не фейдящим
 	return true, staleSrc
 }
 
@@ -587,6 +610,31 @@ func (p *player) resumeChain(gen uint64, chain beep.Streamer, expectedSrc beep.S
 	p.pos.Store(posFrames)
 	p.peak.Store(0)
 	return true
+}
+
+// abandonFailedSeek приводит плеер в состояние idle, когда src.Seek() внутри
+// AudioService.Seek() вернул ошибку ПОСЛЕ snapshotForSeek. К этому моменту
+// snapshotForSeek уже отцепил цепочку от микшера (mix.Clear()) и
+// зарезервировал gen — если оставить status как есть, пустой beep.Mixer
+// продолжит честно отдавать тишину с ok=true (см. комментарий у onSamples),
+// p.pos будет расти бесконечно, done никогда не придёт и автопереход не
+// сработает: движок останется в псевдо-играющем состоянии навсегда. Сам
+// src.Seek() мог оставить декодер в неопределённой позиции — доверять ему
+// больше нечего, поэтому единственный безопасный выход — признать трек
+// оборванным.
+//
+// gen/expectedSrc — те же, что вернул snapshotForSeek: если между ним и этим
+// вызовом кто-то успел начать более новую операцию (Play/Stop/другой Seek),
+// её состояние уже расставлено, и трогать нечего — обычный И4.
+func (p *player) abandonFailedSeek(gen uint64, expectedSrc beep.StreamSeekCloser) (oldSrc beep.StreamSeekCloser) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.gen != gen || p.src != expectedSrc {
+		return nil
+	}
+	oldSrc = p.src
+	p.resetTrackFieldsLocked()
+	return oldSrc
 }
 
 // finishIfCurrent обрабатывает "трек доиграл" (done <- gen из Seq/Callback

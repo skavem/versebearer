@@ -132,6 +132,13 @@ func (p *player) defaultOpenDevice(deviceId string) (*malgo.AllocatedContext, *m
 		return nil, nil, 0, "", fmt.Errorf("не удалось открыть устройство вывода: %w", err)
 	}
 
+	// Сбрасываем ДО Start(), а не только в ensureDevice после возврата отсюда:
+	// если устройство откажет в микроокне сразу после Start() (сбойное
+	// железо, гонка с системой), onDeviceStopped увидит здесь актуальный
+	// false, а не унаследованный true от предыдущего closeDevice() — иначе
+	// настоящая пропажа устройства в этот момент была бы молча принята за
+	// наш плановый останов, и audio_device_lost не пришёл бы.
+	p.expectStop.Store(false)
 	if err := dev.Start(); err != nil {
 		dev.Uninit()
 		ctx.Uninit()

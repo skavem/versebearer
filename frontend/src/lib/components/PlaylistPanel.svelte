@@ -12,8 +12,16 @@
   // выбранный). Отдельно от isPlayingItem: выбор клавиатурой и то, что
   // сейчас реально звучит, — разные вещи, поэтому и подсветки разные
   // (синий = выбор, янтарь = в эфире).
-  let { selectedItemId = $bindable(null) }: { selectedItemId?: number | null } =
-    $props();
+  //
+  // modalOpen — наружу для Audio.svelte: её собственный document-level
+  // обработчик клавиш обязан знать, открыта ли модалка удаления плейлиста
+  // (ниже), чтобы не пропустить Escape дальше на fadeOutStop() (ревью:
+  // isFromModal(e) по e.target ненадёжен — фокус при открытии модалки
+  // остаётся на кнопке в списке, вне .modal).
+  let {
+    selectedItemId = $bindable(null),
+    modalOpen = $bindable(false),
+  }: { selectedItemId?: number | null; modalOpen?: boolean } = $props();
 
   const playlists = $derived(audioStore.playlists);
   const tracks = $derived(audioStore.tracks);
@@ -23,6 +31,10 @@
   let playlistToDelete = $state<Playlist | null>(null);
   let renamingId = $state<number | null>(null);
   let renameValue = $state("");
+
+  $effect(() => {
+    modalOpen = playlistToDelete !== null;
+  });
 
   // Трек для добавления, выбранный через Select — сбрасывается после
   // каждого добавления, чтобы не пришлось руками очищать поле.
@@ -289,17 +301,30 @@
                       ? "border-primary bg-primary/5"
                       : "border-transparent hover:bg-base-200",
                 ]}
-                draggable="true"
                 onclick={() => (selectedItemId = item.ID)}
-                ondragstart={() => onDragStart(item)}
                 ondragover={onDragOver}
                 ondrop={() => onDrop(playlist, item)}
               >
-                <MuiIcon
-                  name="drag_indicator"
-                  style="font-size: 1rem; cursor: grab;"
-                  classes="opacity-40"
-                />
+                <!-- Ручка перетаскивания — ТОЛЬКО эта иконка, не вся строка
+                (ревью): draggable на всём <li> означал промах мышью в
+                несколько пикселей = случайный drag, а перетаскивание/
+                удаление играющего элемента на бэке делает ЖЁСТКИЙ Stop() без
+                фейда. ondragend — не только onDrop — иначе отменённый
+                (сброшенный мимо валидной цели) drag оставлял dragItemId
+                залипшим до следующего перетаскивания. -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  draggable="true"
+                  ondragstart={() => onDragStart(item)}
+                  ondragend={() => (dragItemId = null)}
+                  style="cursor: grab;"
+                >
+                  <MuiIcon
+                    name="drag_indicator"
+                    style="font-size: 1rem"
+                    classes="opacity-40"
+                  />
+                </span>
                 <span class="w-6 text-right font-mono text-xs opacity-60"
                   >{item.position}</span
                 >

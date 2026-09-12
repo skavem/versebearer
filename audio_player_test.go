@@ -40,16 +40,21 @@ func setupPlayerTestDB(t *testing.T) {
 
 // fakeSeekCloser — минимальный beep.StreamSeekCloser для тестов движка,
 // которым не нужен настоящий аудиофайл: только факт, что Close() был
-// вызван (для проверки И2/И3 — "старый src.Close() — после отпускания p.mu").
+// вызван (для проверки И2/И3 — "старый src.Close() — после отпускания p.mu"),
+// и (seekErr) возможность симулировать отказ src.Seek() — beep/flac
+// возвращает "not enabled" для FLAC без seek-таблицы (наш собственный формат
+// конвертации при импорте), vorbis отказывает на любом SetPosition, mp3 — на
+// позиции за пределами файла.
 type fakeSeekCloser struct {
 	onClose func()
+	seekErr error
 }
 
 func (f *fakeSeekCloser) Stream(samples [][2]float64) (int, bool) { return 0, false }
 func (f *fakeSeekCloser) Err() error                              { return nil }
 func (f *fakeSeekCloser) Len() int                                { return 0 }
 func (f *fakeSeekCloser) Position() int                           { return 0 }
-func (f *fakeSeekCloser) Seek(p int) error                        { return nil }
+func (f *fakeSeekCloser) Seek(p int) error                        { return f.seekErr }
 func (f *fakeSeekCloser) Close() error {
 	if f.onClose != nil {
 		f.onClose()
@@ -181,6 +186,58 @@ func TestStopClosesSourceOutsideMuAndDropsStaleDone(t *testing.T) {
 	// должно быть молча отброшено (И4).
 	if _, _, _, changed := p.finishIfCurrent(gen); changed {
 		t.Error("finishIfCurrent must drop a stale generation (И4), not resurrect a stopped track")
+	}
+}
+
+// TestSeekErrorLeavesEngineFunctional — ревью (HIGH №1): snapshotForSeek уже
+// сделал mix.Clear() и отцепил цепочку от микшера ДО того, как AudioService.
+// Seek() вызывает src.Seek(). Если тот вернёт ошибку (реальный триггер:
+// beep/flac на FLAC без seek-таблицы — наш собственный формат конвертации
+// при импорте — а также любой отказ vorbis.SetPosition или mp3 на позиции за
+// пределами файла), голый return err раньше оставлял движок в псевдо-
+// играющем состоянии: пустой beep.Mixer честно отдаёт тишину с ok=true,
+// p.pos продолжает расти, done никогда не придёт — трек "играет" в UI, но из
+// колонок тишина, и он никогда не закончится (нет автоперехода).
+//
+// Тест проверяет, что после отказа Seek() движок явно приведён в idle —
+// abandonFailedSeek — а не оставлен висеть с p.status==playing на пустом
+// микшере.
+func TestSeekErrorLeavesEngineFunctional(t *testing.T) {
+	p := newPlayer(1.0, "")
+	p.devRate = 44100
+	a := &AudioService{pl: p}
+
+	var closed atomic.Bool
+	seekErr := errors.New("seek не поддерживается этим форматом")
+	src := &fakeSeekCloser{
+		seekErr: seekErr,
+		onClose: func() { closed.Store(true) },
+	}
+
+	gen := p.nextGen()
+	installed, _ := p.startTrack(gen, generators.Silence(-1), src, trackMeta{fileRate: 44100, trackId: 1, itemId: 1, totalSamples: -1})
+	if !installed {
+		t.Fatal("startTrack should install the chain")
+	}
+
+	if err := a.Seek(1000); err == nil {
+		t.Fatal("Seek с отказавшим src.Seek() должен вернуть ошибку")
+	}
+
+	st := a.State()
+	if st.Status != string(statusIdle) {
+		t.Fatalf("status = %q после отказа Seek(), want %q — движок оставлен в псевдо-играющем состоянии (пустой Mixer, ok=true, позиция росла бы бесконечно)", st.Status, statusIdle)
+	}
+	if !closed.Load() {
+		t.Error("после отказа Seek() декодер не был закрыт — файловый хендлер утёк")
+	}
+
+	// Движок обязан остаться рабочим: обычные Stop/Toggle не должны
+	// паниковать или зависать на уже недействительном состоянии.
+	a.Toggle()
+	a.Stop()
+	if st := a.State(); st.Status != string(statusIdle) {
+		t.Fatalf("status после Stop() = %q, want %q", st.Status, statusIdle)
 	}
 }
 
@@ -454,61 +511,70 @@ func TestZeroFadeProducesNoNaN(t *testing.T) {
 // (исходный totalSamples − новая позиция), а не переиспользовать исходное
 // значение — иначе после перемотки внутрь обрезанного окна трек либо не
 // остановится вовремя, либо оборвётся раньше времени.
+//
+// ⚠️ Ревью: раньше этот тест переписывал ТЕЛО Seek() (сам считал fileFrame/
+// remaining/fade, сам звал buildChain/resumeChain) — он оставался бы зелёным
+// даже при поломке настоящего AudioService.Seek(). Здесь вызывается РЕАЛЬНЫЙ
+// a.Seek(). rate=1000 выбрана так, что 1 сэмпл устройства == 1 мс — ms,
+// который принимает Seek(), не нужно отдельно пересчитывать.
+//
+// Проверка объёма сама по себе не может идти через p.mvol/p.mix: beep.Mixer
+// маскирует ok=false пустотой (см. предупреждение у TestFadeOutStopDrains).
+// Вместо этого используется другое наблюдаемое свойство buildChain — то, что
+// beep.Callback(done<-gen) срабатывает СИНХРОННО внутри того самого вызова
+// Stream(), которым исчерпавшийся beep.Take впервые вернул(remains<=0),
+// независимо от того, как Mixer поверх маскирует итоговый ok. Прогоняя
+// p.mvol.Stream() РОВНО по одному сэмплу за вызов и проверяя p.done
+// неблокирующим чтением после каждого, можно поймать точную границу.
 func TestSeekRecomputesRemainingFromNewPosition(t *testing.T) {
-	const rate = beep.SampleRate(8000)
-	const total = 4000  // окно после трима — 4000 сэмплов устройства
-	const seekTo = 2500 // перематываем внутрь окна: до конца остаётся 1500
+	const rate = beep.SampleRate(1000) // 1 сэмпл устройства == 1 мс
+	const total = 4000                 // окно после трима — 4000 сэмплов устройства (4000 мс)
+	const seekToMs = 2500              // перематываем внутрь окна: до конца остаётся 1500 сэмплов
+	const wantRemaining = total - seekToMs
 
 	p := newPlayer(1.0, "")
 	p.devRate = rate
-	src := &sineSrc{rate: int(rate), freq: 440}
+	src := &sineSrc{rate: int(rate), freq: 44}
 	gen := p.nextGen()
 	chain := buildChain(src, rate, rate, 0, total, 0, p.done, gen)
 	if installed, _ := p.startTrack(gen, chain, src, trackMeta{fileRate: rate, itemId: 1, totalSamples: total}); !installed {
 		t.Fatal("startTrack failed")
 	}
 
-	// "Прогреваем", как TestSeekRebuildNoStaleTail — читаем немного до seek.
+	// "Прогреваем" реземплер, как TestSeekRebuildNoStaleTail — читаем немного
+	// до seek.
 	warm := make([][2]float64, 500)
 	if _, ok := p.mvol.Stream(warm); !ok {
 		t.Fatal("warm-up failed")
 	}
 
-	snap, gen2, ok := p.snapshotForSeek()
-	if !ok {
-		t.Fatal("snapshotForSeek: nothing to seek")
-	}
-	if err := snap.src.Seek(seekTo); err != nil {
+	a := &AudioService{pl: p}
+	if err := a.Seek(seekToMs); err != nil {
 		t.Fatalf("Seek: %v", err)
 	}
 
-	remaining, fade := trimFadeSamplesAt(snap.totalSamples, snap.fadeSamples, seekTo)
-	wantRemaining := total - seekTo
-	if remaining != wantRemaining {
-		t.Fatalf("remaining = %d, want %d (total-seekTo, а не исходный total=%d)", remaining, wantRemaining, total)
-	}
-
-	chain2 := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, remaining, fade, p.done, gen2)
-	if !p.resumeChain(gen2, chain2, snap.src, int64(seekTo)) {
-		t.Fatal("resumeChain rejected a legitimate seek")
-	}
-
-	// Читаем chain2.Stream() напрямую, а не через p.mvol/p.mix — см.
-	// предупреждение у TestFadeOutStopDrains про beep.Mixer, маскирующий
-	// ok=false пустотой после дренирования.
-	buf := make([][2]float64, 33)
-	got := 0
-	for i := 0; i < 10000; i++ {
-		n, ok := chain2.Stream(buf)
-		got += n
-		if got > wantRemaining {
-			t.Fatalf("поток продолжается после %d сэмплов (ожидалось <= %d) — Take пересобран от ИСХОДНОГО total, а не от новой позиции", got, wantRemaining)
+	one := make([][2]float64, 1)
+	realSamples := 0
+	firedAt := -1
+	for i := 1; i <= wantRemaining+5; i++ {
+		p.mvol.Stream(one)
+		select {
+		case g := <-p.done:
+			if g != gen+1 { // snapshotForSeek резервирует ровно одно новое поколение
+				t.Fatalf("done fired with gen=%d, want %d", g, gen+1)
+			}
+			firedAt = i
+		default:
+			realSamples = i
 		}
-		if !ok {
+		if firedAt != -1 {
 			break
 		}
 	}
-	if got != wantRemaining {
-		t.Fatalf("после seek отдано %d сэмплов, ожидалось ровно %d (total-newPos)", got, wantRemaining)
+	if firedAt == -1 {
+		t.Fatalf("цепочка не отдренировалась за %d сэмплов после seek", wantRemaining+5)
+	}
+	if realSamples != wantRemaining {
+		t.Fatalf("отдано %d реальных сэмплов до срабатывания done, ожидалось ровно %d (total-seekTo) — remaining пересчитан не от новой позиции", realSamples, wantRemaining)
 	}
 }

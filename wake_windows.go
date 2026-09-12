@@ -13,8 +13,8 @@ import (
 // golang.org/x/sys/windows их не экспортирует (ни функции, ни констант —
 // проверено), поэтому DLL подгружается вручную через kernel32.dll.
 const (
-	esContinuous     = 0x80000000
-	esSystemRequired = 0x00000001
+	esContinuous      = 0x80000000
+	esSystemRequired  = 0x00000001
 	esDisplayRequired = 0x00000002
 )
 

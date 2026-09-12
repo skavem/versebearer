@@ -288,10 +288,21 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	// buildChain): фейд-аут перед автопереходом строится в цепочку сразу при
 	// старте трека. Отсутствие плейлиста (не должно случаться, но не повод
 	// падать) — fadeMs=0, как если бы фейд не был настроен.
+	//
+	// ⚠️ Фейд применяется, ТОЛЬКО если у AutoAdvance действительно есть куда
+	// переходить (см. nextPlaylistItem, тот же расчёт, что чуть ниже сделает
+	// preparePendingNext): план описывает фейд как "перед автопереходом", а
+	// не как безусловное затухание в конце каждого трека — иначе последний
+	// трек плейлиста (или единственный трек без AutoAdvance) тоже уходил бы
+	// в фейд, хотя после него ничего не звучит.
 	fadeMs := 0
 	var playlist models.Playlist
 	if err := inits.DB.First(&playlist, playlistId).Error; err == nil {
-		fadeMs = playlist.FadeMs
+		if playlist.AutoAdvance {
+			if _, hasNext := a.nextPlaylistItem(playlistId, itemId, playlist.Loop); hasNext {
+				fadeMs = playlist.FadeMs
+			}
+		}
 	}
 
 	// Резервируем поколение ДО дорогой сборки цепочки (И4): любой
@@ -398,6 +409,17 @@ func (a *AudioService) Seek(msF float32) error {
 
 	fileFrame := fileSamples(ms, snap.fileRate) + snap.trimStartFileFrame
 	if err := snap.src.Seek(fileFrame); err != nil {
+		// snapshotForSeek уже отцепил цепочку от микшера и зарезервировал
+		// gen — если оставить это как есть, движок навсегда останется в
+		// псевдо-играющем состоянии (см. abandonFailedSeek). Известный
+		// триггер: beep/flac отказывает в Seek на FLAC без seek-таблицы (наш
+		// собственный формат конвертации при импорте), vorbis — на любом
+		// отказе SetPosition, mp3 — на позиции за пределами файла.
+		a.invalidatePending() // "следующий" трек автоперехода больше не актуален — трек оборван, не доиграет
+		if oldSrc := a.pl.abandonFailedSeek(gen, snap.src); oldSrc != nil {
+			oldSrc.Close() // файловый IO — вне p.mu (И2/И3)
+			a.emit("audio_stopped", nil)
+		}
 		return fmt.Errorf("не удалось перемотать: %w", err)
 	}
 
@@ -434,11 +456,32 @@ func (a *AudioService) Seek(msF float32) error {
 // invalidatePending здесь — по аналогии со Stop(), заранее подготовленный
 // "следующий" трек (автопереход) больше не актуален, раз оператор явно
 // остановил воспроизведение.
+//
+// ⚠️ Два ранних выхода на жёсткий Stop(), ДО построения фейд-цепочки:
+//   - p.fadingOut уже true — второй "Стоп с фейдом" подряд. Повторная
+//     пересборка ниже начала бы НЕЗАВИСИМЫЙ effects.Transition с нуля
+//     (buildChain/resumeChain не умеют "продолжить" старый), то есть на
+//     мгновение подняла бы громкость обратно к startGain=1 и запустила фейд
+//     заново — оператор, дважды нажавший стоп, хочет тишины сейчас, а не
+//     повторного фейда.
+//   - трек на паузе — цепочка фейда, поставленная поверх приостановленного
+//     beep.Ctrl, никогда не продвинется (Ctrl.Paused пропускает вызов
+//     обёрнутого Stream целиком): done не придёт, оператор навсегда
+//     останется на паузе с "фейднутым" в памяти треком.
 func (a *AudioService) FadeOutStop() {
+	if a.pl.fadingOut.Load() {
+		a.Stop()
+		return
+	}
+
 	a.invalidatePending()
 
 	playlistId, _, ok := a.pl.currentItem()
 	if !ok {
+		a.Stop()
+		return
+	}
+	if a.pl.isPaused() {
 		a.Stop()
 		return
 	}
@@ -464,7 +507,9 @@ func (a *AudioService) FadeOutStop() {
 
 	fadeSamples := deviceSamples(fadeMs, snap.devRate)
 	chain := buildChain(snap.src, snap.fileRate, snap.devRate, snap.gainDb, fadeSamples, fadeSamples, a.pl.done, gen)
-	a.pl.resumeChain(gen, chain, snap.src, pos)
+	if a.pl.resumeChain(gen, chain, snap.src, pos) {
+		a.pl.fadingOut.Store(true)
+	}
 }
 
 // SetVolume меняет общую громкость (0..1) немедленно и планирует
@@ -529,6 +574,12 @@ type TrackInput struct {
 // оператор видел молчаливый откат правки в UI без единого слова объяснения.
 func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.AudioTrack, error) {
 	id := uint(idF)
+
+	var track models.AudioTrack
+	if err := inits.DB.First(&track, id).Error; err != nil {
+		return nil, fmt.Errorf("трек не найден: %w", err)
+	}
+
 	updates := map[string]any{}
 	if input.Title != nil {
 		updates["title"] = *input.Title
@@ -536,11 +587,29 @@ func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.Audio
 	if input.Artist != nil {
 		updates["artist"] = *input.Artist
 	}
+	// trimStart/trimEnd — итоговые значения ПОСЛЕ применения патча (частичный
+	// TrackInput мог прислать только одно из двух полей): валидировать нужно
+	// результат, а не изменённое поле само по себе, иначе патч, меняющий
+	// только TrimStartMs, мог бы молча образовать невалидную пару со старым
+	// TrimEndMs.
+	trimStart, trimEnd := track.TrimStartMs, track.TrimEndMs
 	if input.TrimStartMs != nil {
-		updates["trim_start_ms"] = *input.TrimStartMs
+		trimStart = *input.TrimStartMs
+		updates["trim_start_ms"] = trimStart
 	}
 	if input.TrimEndMs != nil {
-		updates["trim_end_ms"] = *input.TrimEndMs
+		trimEnd = *input.TrimEndMs
+		updates["trim_end_ms"] = trimEnd
+	}
+	// TrimEndMs==0 значит "до конца файла" (models.AudioTrack) — границы нет,
+	// проверять нечего. Иначе конец обязан быть строго после начала: end<=start
+	// даёт trimmedDurationMs()==0 -> beep.Take(0) -> трек не звучит и мгновенно
+	// отдаёт done — с AutoAdvance+Loop плейлист пролетит по кругу за секунду.
+	// Источник истины — здесь (защищает от любого вызывающего); фронт
+	// (EditTrackModal) дублирует ту же проверку только для мгновенной
+	// обратной связи до сохранения.
+	if trimEnd > 0 && trimEnd <= trimStart {
+		return nil, fmt.Errorf("конец обрезки должен быть позже начала")
 	}
 	if input.GainDb != nil {
 		updates["gain_db"] = *input.GainDb
@@ -550,10 +619,18 @@ func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.Audio
 			return nil, fmt.Errorf("не удалось сохранить изменения: %w", err)
 		}
 	}
-	var track models.AudioTrack
 	if err := inits.DB.First(&track, id).Error; err != nil {
 		return nil, fmt.Errorf("трек не найден: %w", err)
 	}
+
+	// Правка trim/gain могла сделать неверным уже подготовленный "следующий"
+	// трек автоперехода (этап 4): pending декодирован и посчитан
+	// (totalSamples/fadeSamples/trimStartFileFrame) со старыми значениями —
+	// без инвалидации автопереход поставил бы устаревшую версию правки.
+	if a.pl != nil {
+		a.invalidatePendingForTrack(id)
+	}
+
 	a.emit("audio_tracks_update", a.ListTracks())
 	return &track, nil
 }

@@ -11,6 +11,15 @@
   let trimEndMs = $state(0);
   let gainDb = $state(0);
 
+  // trimStartError/trimEndError — ревью: minSecToMs раньше тихо давала 0 на
+  // неразобранном вводе ("15" вместо "0:15"), поле оставалось "неконтроли-
+  // руемым" (текст на экране не совпадал с фактическим trimStartMs/
+  // trimEndMs), оператор сохранял и на служении трек стартовал с тишины.
+  // Теперь неразобранный ввод НЕ подменяется на 0 — сохраняется прежнее
+  // значение и показывается ошибка рядом с полем.
+  let trimStartError = $state("");
+  let trimEndError = $state("");
+
   $effect(() => {
     if (track) {
       title = track.title;
@@ -18,6 +27,8 @@
       trimStartMs = track.trimStartMs;
       trimEndMs = track.trimEndMs;
       gainDb = track.gainDb;
+      trimStartError = "";
+      trimEndError = "";
     }
   });
 
@@ -31,13 +42,55 @@
     return `${min}:${sec.toString().padStart(2, "0")}`;
   }
 
-  function minSecToMs(text: string): number {
-    const m = text.trim().match(/^(\d+):([0-5]?\d)$/);
-    if (!m) return 0;
-    const min = parseInt(m[1], 10);
-    const sec = parseInt(m[2], 10);
-    return (min * 60 + sec) * 1000;
+  // Принимает "м:сс" И просто "сс" (сырые секунды без минут — оператору
+  // проще ввести "15", чем "0:15"). null — вход не разобран: вызывающий
+  // обязан показать ошибку и НЕ подменять текущее значение на 0 (см.
+  // trimStartError/trimEndError выше).
+  function minSecToMs(text: string): number | null {
+    const trimmed = text.trim();
+    const withColon = trimmed.match(/^(\d+):([0-5]?\d)$/);
+    if (withColon) {
+      const min = parseInt(withColon[1], 10);
+      const sec = parseInt(withColon[2], 10);
+      return (min * 60 + sec) * 1000;
+    }
+    const secondsOnly = trimmed.match(/^\d+$/);
+    if (secondsOnly) {
+      return parseInt(trimmed, 10) * 1000;
+    }
+    return null;
   }
+
+  function onTrimStartChange(e: Event & { currentTarget: HTMLInputElement }) {
+    const parsed = minSecToMs(e.currentTarget.value);
+    if (parsed === null) {
+      trimStartError = "Формат: м:сс или секунды";
+      e.currentTarget.value = msToMinSec(trimStartMs); // не даём неверному тексту зависнуть в поле
+      return;
+    }
+    trimStartError = "";
+    trimStartMs = parsed;
+  }
+
+  function onTrimEndChange(e: Event & { currentTarget: HTMLInputElement }) {
+    const parsed = minSecToMs(e.currentTarget.value);
+    if (parsed === null) {
+      trimEndError = "Формат: м:сс или секунды";
+      e.currentTarget.value = msToMinSec(trimEndMs);
+      return;
+    }
+    trimEndError = "";
+    trimEndMs = parsed;
+  }
+
+  // invalidTrimRange — план: TrimEndMs<=TrimStartMs даёт trimmedDurationMs()
+  // == 0 -> beep.Take(0) -> трек не звучит и мгновенно отдаёт done, с
+  // AutoAdvance+Loop плейлист пролетит по кругу за секунду. TrimEndMs==0
+  // значит "до конца файла" — не граница, проверять нечего. Источник истины
+  // — бэк (UpdateTrack, audio_service.go); эта проверка — только для
+  // мгновенной обратной связи до сохранения.
+  const invalidTrimRange = $derived(trimEndMs > 0 && trimEndMs <= trimStartMs);
+  const canSave = $derived(!trimStartError && !trimEndError && !invalidTrimRange);
 
   // «Взять текущую позицию» доступна, только пока играет (или на паузе)
   // именно ЭТОТ трек: PlayerState.PositionMs считается ОТ TrimStartMs
@@ -120,8 +173,7 @@
               <input
                 type="text"
                 value={msToMinSec(trimStartMs)}
-                onchange={(e) =>
-                  (trimStartMs = minSecToMs(e.currentTarget.value))}
+                onchange={onTrimStartChange}
                 placeholder="0:00"
                 class="input input-sm input-bordered join-item w-full"
               />
@@ -137,6 +189,11 @@
                 <MuiIcon name="my_location" style="font-size: 1rem" />
               </button>
             </div>
+            {#if trimStartError}
+              <div class="label py-0.5">
+                <span class="label-text-alt text-error">{trimStartError}</span>
+              </div>
+            {/if}
           </label>
           <label class="form-control flex-1">
             <div class="label py-1">
@@ -146,8 +203,7 @@
               <input
                 type="text"
                 value={msToMinSec(trimEndMs)}
-                onchange={(e) =>
-                  (trimEndMs = minSecToMs(e.currentTarget.value))}
+                onchange={onTrimEndChange}
                 placeholder="0:00"
                 class="input input-sm input-bordered join-item w-full"
               />
@@ -163,8 +219,19 @@
                 <MuiIcon name="my_location" style="font-size: 1rem" />
               </button>
             </div>
+            {#if trimEndError}
+              <div class="label py-0.5">
+                <span class="label-text-alt text-error">{trimEndError}</span>
+              </div>
+            {/if}
           </label>
         </div>
+
+        {#if !trimStartError && !trimEndError && invalidTrimRange}
+          <div class="text-xs text-error">
+            Конец обрезки должен быть позже начала.
+          </div>
+        {/if}
 
         <label class="form-control">
           <div class="label py-1">
@@ -186,7 +253,7 @@
 
       <div class="modal-action">
         <button class="btn btn-ghost" onclick={close}>Отмена</button>
-        <button class="btn btn-neutral" onclick={save}>
+        <button class="btn btn-neutral" disabled={!canSave} onclick={save}>
           <MuiIcon name="save" />
           Сохранить
         </button>

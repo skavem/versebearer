@@ -48,6 +48,9 @@
       aria-label="Закрыть"
     ></button>
     <div class="dd-panel" role="listbox" aria-label="Устройство вывода звука">
+      {#if devices.loading}
+        <div class="dd-option opacity-60">Загрузка…</div>
+      {/if}
       {#each devices.list as d (d.id)}
         <button
           type="button"

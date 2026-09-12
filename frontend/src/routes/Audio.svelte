@@ -6,7 +6,7 @@
   import MiniPlayer from "$lib/components/MiniPlayer.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
   import PlaylistPanel from "$lib/components/PlaylistPanel.svelte";
-  import { isFromModal, isTypingTarget } from "$lib/keyboard";
+  import { isTypingTarget } from "$lib/keyboard";
   import { audioStore } from "$lib/stores/audioStore.svelte";
 
   const tracks = $derived(audioStore.tracks);
@@ -14,6 +14,22 @@
   let editingTrack = $state<AudioTrack | null>(null);
   let trackToDelete = $state<AudioTrack | null>(null);
   let importErrors = $state<string[]>([]);
+
+  // playlistModalOpen — открыта ли модалка удаления плейлиста ВНУТРИ
+  // PlaylistPanel (её собственное состояние, вынесенное наружу через
+  // bind:modalOpen).
+  let playlistModalOpen = $state(false);
+
+  // anyModalOpen — своё локальное состояние вкладки вместо isFromModal(e)
+  // (ревью): ни одна из трёх модалок вкладки не забирает фокус при открытии
+  // — он остаётся на кнопке «карандаш»/«корзина» в списке, ВНЕ .modal, и
+  // isFromModal(e), проверяющий e.target.closest('.modal'), пропускал
+  // Escape дальше на fadeOutStop() одновременно с закрытием модалки самой
+  // модалкой (svelte:window). keyboard.ts не трогаем — им пользуются
+  // «Библия» и «Песни».
+  const anyModalOpen = $derived(
+    editingTrack !== null || trackToDelete !== null || playlistModalOpen,
+  );
 
   // subView переключает вкладку между медиатекой (этап 1) и плейлистами
   // (этап 4) — устройство вывода и ошибка общие для обеих, поэтому живут в
@@ -74,7 +90,7 @@
   // раскладке key отдаёт символ раскладки (см. keyboard.ts).
   $effect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isFromModal(e)) return;
+      if (anyModalOpen) return;
       // Ползунки прогресса/громкости в MiniPlayer — это <input type=range>,
       // т.е. HTMLInputElement: isTypingTarget их тоже глушит. Они сами
       // делают blur() после change (см. MiniPlayer.svelte), так что этот
@@ -83,14 +99,17 @@
 
       switch (e.code) {
         case "ArrowUp":
-          if (subView === "playlists") movePlaylistSelection(-1);
+          if (subView !== "playlists") return;
+          movePlaylistSelection(-1);
           e.preventDefault();
           return;
         case "ArrowDown":
-          if (subView === "playlists") movePlaylistSelection(1);
+          if (subView !== "playlists") return;
+          movePlaylistSelection(1);
           e.preventDefault();
           return;
         case "Enter":
+          if (subView !== "playlists") return;
           playSelectedPlaylistItem();
           e.preventDefault();
           return;
@@ -294,7 +313,10 @@
     </div>
   {:else}
     <div class="min-h-0 flex-1">
-      <PlaylistPanel bind:selectedItemId={selectedPlaylistItemId} />
+      <PlaylistPanel
+        bind:selectedItemId={selectedPlaylistItemId}
+        bind:modalOpen={playlistModalOpen}
+      />
     </div>
   {/if}
 

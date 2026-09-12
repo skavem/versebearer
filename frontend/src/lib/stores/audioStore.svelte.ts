@@ -156,7 +156,15 @@ const createAudioStore = () => {
   };
 
   async function refreshPlayerState() {
-    playerState = await State();
+    try {
+      playerState = await State();
+    } catch (e) {
+      // Без try/catch reject из setInterval (см. startPolling) уходил бы в
+      // unhandled rejection и замораживал бы последний снимок навсегда —
+      // кнопки транспорта выглядели бы активными, а «Стоп» визуально не
+      // срабатывал бы, хотя бэк уже остановился.
+      lastError = errorMessage(e);
+    }
   }
 
   Events.On(
@@ -388,7 +396,15 @@ const createAudioStore = () => {
         lastError = errorMessage(e);
       }
     },
+    // seek обновляет playerState.positionMs оптимистично, не дожидаясь
+    // следующего опроса (до 500 мс, см. startPolling) — по образцу setVolume
+    // ниже, для той же проблемы: несколько быстрых нажатий ArrowLeft/Right
+    // (seekRelative в Audio.svelte) внутри одного окна опроса иначе считали
+    // бы дельту от одной и той же устаревшей positionMs, и только последнее
+    // нажатие имело бы эффект — оператор жмёт четыре раза, трек прыгает один
+    // раз на 5 секунд.
     async seek(ms: number) {
+      if (playerState) playerState = { ...playerState, positionMs: ms };
       try {
         await Seek(ms);
       } catch (e) {

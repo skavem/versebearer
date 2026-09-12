@@ -48,6 +48,13 @@
     // isTypingTarget (keyboard.ts) молча глушит Esc/Space/стрелки, пока
     // фокус остался на ползунке. blur() сразу после действия чинит это
     // локально, не трогая общий keyboard.ts.
+    //
+    // ⚠️ Этого blur() здесь недостаточно: `change` у range не возникает при
+    // клике ровно по бегунку без изменения значения (щёлкнули туда, где он
+    // уже стоял) — фокус тогда остаётся на ползунке, и isTypingTarget глушит
+    // ВСЮ карту клавиш вкладки. onpointerup на самом инпуте (см. разметку
+    // ниже) — подстраховка на отпускание указателя независимо от того,
+    // сработал ли `change`.
     e.currentTarget.blur();
   }
 
@@ -63,8 +70,18 @@
   // (план, этап 6). Peak уже приходит с обычным опросом PlayerState (этап
   // 2) — здесь только локальная анимация между двумя опросами, никакого
   // нового канала к бэку.
+  //
+  // ⚠️ Эффект читает isIdle ПЕРВОЙ строкой — это делает его реактивной
+  // зависимостью: пока ничего не играет, requestAnimationFrame вообще не
+  // планируется (60 раз/с впустую в простое — не нужно), а как только
+  // isIdle меняется, Svelte сам отменяет предыдущий RAF (cleanup) и
+  // перезапускает эффект.
   let peakHold = $state(0);
   $effect(() => {
+    if (isIdle) {
+      peakHold = 0;
+      return;
+    }
     let raf = 0;
     let last = performance.now();
     const decayPerSec = 2.2;
@@ -146,6 +163,7 @@
       disabled={isIdle}
       oninput={onSeekInput}
       onchange={onSeekChange}
+      onpointerup={(e) => e.currentTarget.blur()}
       aria-label="Позиция воспроизведения"
     />
     <span
@@ -173,6 +191,7 @@
         value={volumePct}
         oninput={onVolumeInput}
         onchange={onVolumeChange}
+        onpointerup={(e) => e.currentTarget.blur()}
         aria-label="Громкость"
       />
       <span class="w-8 font-mono text-xs opacity-60">{volumePct}%</span>

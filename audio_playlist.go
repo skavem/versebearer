@@ -58,6 +58,7 @@ func (a *AudioService) CreatePlaylist(name string) *models.Playlist {
 	playlist := models.Playlist{Name: name}
 	if err := inits.DB.Create(&playlist).Error; err != nil {
 		log.Println("CreatePlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось создать плейлист: %s", err.Error()))
 		return nil
 	}
 	a.emit("audio_playlists_update", a.ListPlaylists())
@@ -68,6 +69,7 @@ func (a *AudioService) RenamePlaylist(idF float32, name string) []models.Playlis
 	id := uint(idF)
 	if err := inits.DB.Model(&models.Playlist{}).Where("id = ?", id).Update("name", name).Error; err != nil {
 		log.Println("RenamePlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось переименовать плейлист: %s", err.Error()))
 	}
 	playlists := a.ListPlaylists()
 	a.emit("audio_playlists_update", playlists)
@@ -88,9 +90,11 @@ func (a *AudioService) RemovePlaylist(idF float32) []models.Playlist {
 
 	if err := inits.DB.Where("playlist_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
 		log.Println("RemovePlaylist: error clearing items", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось удалить элементы плейлиста: %s", err.Error()))
 	}
 	if err := inits.DB.Delete(&models.Playlist{}, id).Error; err != nil {
 		log.Println("RemovePlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось удалить плейлист: %s", err.Error()))
 	}
 
 	playlists := a.ListPlaylists()
@@ -117,6 +121,7 @@ func (a *AudioService) SetPlaylistFlags(idF float32, input PlaylistFlagsInput) *
 	if len(updates) > 0 {
 		if err := inits.DB.Model(&models.Playlist{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			log.Println("SetPlaylistFlags: error", err)
+			a.emit("audio_error", fmt.Sprintf("не удалось сохранить настройки плейлиста: %s", err.Error()))
 		}
 	}
 
@@ -148,11 +153,13 @@ func (a *AudioService) AddToPlaylist(playlistIdF, trackIdF float32) *models.Play
 	var count int64
 	if err := inits.DB.Model(&models.PlaylistItem{}).Where("playlist_id = ?", playlistId).Count(&count).Error; err != nil {
 		log.Println("AddToPlaylist: error counting items", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось добавить трек в плейлист: %s", err.Error()))
 		return nil
 	}
 	item := models.PlaylistItem{PlaylistId: playlistId, TrackId: trackId, Position: int(count) + 1}
 	if err := inits.DB.Create(&item).Error; err != nil {
 		log.Println("AddToPlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось добавить трек в плейлист: %s", err.Error()))
 		return nil
 	}
 
@@ -200,6 +207,7 @@ func (a *AudioService) RemoveFromPlaylist(itemIdF float32) *models.Playlist {
 	})
 	if err != nil {
 		log.Println("RemoveFromPlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось убрать трек из плейлиста: %s", err.Error()))
 		return nil
 	}
 
@@ -239,6 +247,7 @@ func (a *AudioService) ReorderPlaylist(playlistIdF float32, itemIds []uint) *mod
 	})
 	if err != nil {
 		log.Println("ReorderPlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось изменить порядок плейлиста: %s", err.Error()))
 		return nil
 	}
 
