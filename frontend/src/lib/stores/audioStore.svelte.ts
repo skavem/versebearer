@@ -1,12 +1,38 @@
-import type { AudioTrack } from "$lib/bindings/changeme/backend/models";
+import type {
+  AudioTrack,
+  Playlist,
+} from "$lib/bindings/changeme/backend/models";
 import {
+  AddToPlaylist,
+  CreatePlaylist,
+  GetDeviceId,
   ImportTrack,
+  ListDevices,
+  ListPlaylists,
   ListTracks,
+  Next,
   PickAudioFiles,
+  Play,
+  Prev,
+  RemoveFromPlaylist,
+  RemovePlaylist,
   RemoveTrack,
+  RenamePlaylist,
+  ReorderPlaylist,
+  SetDevice,
+  SetPlaylistFlags,
+  State,
+  Stop,
+  Toggle,
   UpdateTrack,
 } from "$lib/bindings/changeme/audioservice";
-import type { ImportTrackResult, TrackInput } from "$lib/bindings/changeme/models";
+import type {
+  AudioDevice,
+  ImportTrackResult,
+  PlayerState,
+  PlaylistFlagsInput,
+  TrackInput,
+} from "$lib/bindings/changeme/models";
 import { Events } from "@wailsio/runtime";
 
 function errorMessage(e: unknown): string {
@@ -14,11 +40,12 @@ function errorMessage(e: unknown): string {
 }
 
 // ⚠️ Отступление от образца (songsStore.svelte.ts): при module-init тянем
-// только треки. ListDevices() сюда сознательно не входит — это стартовало бы
-// malgo.InitContext ещё до открытия вкладки «Звук», и обещание «на машине без
-// звуковой карты старт не ломается» перестало бы выполняться. Устройства
-// появятся в этапе 3 и будут запрашиваться из $effect самой вкладки.
-// Плейлисты тоже не тянутся здесь — ListPlaylists появится в этапе 4.
+// только треки. Устройства (ListDevices) и плейлисты (ListPlaylists)
+// сознательно НЕ тянутся здесь: ListDevices запустил бы malgo.InitContext
+// ещё до открытия вкладки «Звук», и обещание «на машине без звуковой карты
+// старт не ломается» перестало бы выполняться. Обе загрузки запускает сама
+// вкладка из своего $effect (см. Audio.svelte) — refreshDevices/refreshPlaylists
+// ниже, вызываемые оттуда, а не при импорте модуля.
 const createAudioStore = () => {
   let tracksList = $state<AudioTrack[]>([]);
   let tracksLoading = $state(true);
@@ -27,6 +54,21 @@ const createAudioStore = () => {
   let importing = $state(false);
   let importProgress = $state<{ done: number; total: number } | null>(null);
   let importCancelRequested = false;
+
+  let devicesList = $state<AudioDevice[]>([]);
+  let devicesLoading = $state(true);
+  let selectedDeviceId = $state("");
+
+  let playlistsList = $state<Playlist[]>([]);
+  let playlistsLoading = $state(true);
+  let activePlaylist = $state<Playlist | null>(null);
+
+  // playerState — снимок PlayerState, опрашиваемый по таймеру, пока вкладка
+  // «Звук» открыта (startPolling/stopPolling, из $effect Audio.svelte — план,
+  // этап 2: "State() не должен ходить в БД", но опрос всё равно не бесплатен,
+  // поэтому не крутится, пока никто не смотрит).
+  let playerState = $state<PlayerState | null>(null);
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Последняя ошибка бэка — и асинхронная (audio_error от фоновых задач:
   // замер громкости, чтение медиатеки), и из явных действий оператора
@@ -69,12 +111,76 @@ const createAudioStore = () => {
     },
   };
 
+  const devices = {
+    get loading() {
+      return devicesLoading;
+    },
+    get list() {
+      return devicesList;
+    },
+    get selectedId() {
+      return selectedDeviceId;
+    },
+  };
+
+  const playlists = {
+    get loading() {
+      return playlistsLoading;
+    },
+    get list() {
+      return playlistsList;
+    },
+    set list(v: Playlist[]) {
+      const prevActive = activePlaylist;
+      playlistsList = v;
+      activePlaylist =
+        (prevActive && playlistsList.find((p) => p.ID === prevActive.ID)) ??
+        null;
+      playlistsLoading = false;
+    },
+    get active() {
+      return activePlaylist;
+    },
+    set active(v: Playlist | null) {
+      activePlaylist = v;
+    },
+  };
+
+  const player = {
+    get state() {
+      return playerState;
+    },
+  };
+
+  async function refreshPlayerState() {
+    playerState = await State();
+  }
+
   Events.On(
     "audio_tracks_update",
     ({ data }: { data: AudioTrack[] }) => (tracks.list = data ?? []),
   );
   Events.On("audio_error", ({ data }: { data: string }) => {
     lastError = data;
+  });
+  Events.On(
+    "audio_playlists_update",
+    ({ data }: { data: Playlist[] }) => (playlists.list = data ?? []),
+  );
+  // audio_track_changed несёт готовый PlayerState (Play уже собрал его через
+  // State() на бэке) — используем как есть, не дожидаясь следующего опроса.
+  Events.On(
+    "audio_track_changed",
+    ({ data }: { data: PlayerState }) => (playerState = data),
+  );
+  // audio_stopped/audio_device_lost несут nil — перечитываем явно, чтобы не
+  // рисовать устаревший "играет" до следующего тика опроса.
+  Events.On("audio_stopped", () => {
+    refreshPlayerState();
+  });
+  Events.On("audio_device_lost", () => {
+    lastError = "устройство вывода пропало";
+    refreshPlayerState();
   });
 
   return {
@@ -151,6 +257,122 @@ const createAudioStore = () => {
       } catch (e) {
         lastError = errorMessage(e);
         return false;
+      }
+    },
+
+    devices,
+    async refreshDevices() {
+      try {
+        const [list, id] = await Promise.all([ListDevices(), GetDeviceId()]);
+        devicesList = list ?? [];
+        selectedDeviceId = id ?? "";
+      } catch (e) {
+        lastError = errorMessage(e);
+      } finally {
+        devicesLoading = false;
+      }
+    },
+    async setDevice(id: string): Promise<boolean> {
+      try {
+        await SetDevice(id);
+        selectedDeviceId = id;
+        return true;
+      } catch (e) {
+        lastError = errorMessage(e);
+        return false;
+      }
+    },
+
+    playlists,
+    async refreshPlaylists() {
+      try {
+        playlists.list = (await ListPlaylists()) ?? [];
+      } catch (e) {
+        lastError = errorMessage(e);
+        playlists.list = [];
+      }
+    },
+    async createPlaylist(name: string) {
+      const created = await CreatePlaylist(name);
+      if (created) playlists.active = created;
+      return created;
+    },
+    async renamePlaylist(id: number, name: string) {
+      await RenamePlaylist(id, name);
+    },
+    async removePlaylist(id: number) {
+      if (playlists.active?.ID === id) playlists.active = null;
+      await RemovePlaylist(id);
+    },
+    async setPlaylistFlags(id: number, patch: Partial<PlaylistFlagsInput>) {
+      await SetPlaylistFlags(id, {
+        autoAdvance: patch.autoAdvance ?? null,
+        loop: patch.loop ?? null,
+        fadeMs: patch.fadeMs ?? null,
+      });
+    },
+    async addToPlaylist(playlistId: number, trackId: number) {
+      await AddToPlaylist(playlistId, trackId);
+    },
+    async removeFromPlaylist(itemId: number) {
+      await RemoveFromPlaylist(itemId);
+    },
+    async reorderPlaylist(playlistId: number, itemIds: number[]) {
+      await ReorderPlaylist(playlistId, itemIds);
+    },
+
+    player,
+    refreshPlayerState,
+    // startPolling/stopPolling — вызываются из $effect Audio.svelte (запуск
+    // при монтировании вкладки, остановка при уходе с неё): опрос State()
+    // не бесплатен и не должен крутиться, пока оператор смотрит на другую
+    // вкладку (план, этап 2: транспорт и индикаторы — только на "Звук").
+    startPolling() {
+      if (pollTimer) return;
+      refreshPlayerState();
+      pollTimer = setInterval(refreshPlayerState, 500);
+    },
+    stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    },
+    async play(playlistId: number, itemId: number): Promise<boolean> {
+      try {
+        await Play(playlistId, itemId);
+        return true;
+      } catch (e) {
+        lastError = errorMessage(e);
+        return false;
+      }
+    },
+    async stop() {
+      try {
+        await Stop();
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    async toggle() {
+      try {
+        await Toggle();
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    async next() {
+      try {
+        await Next();
+      } catch (e) {
+        lastError = errorMessage(e);
+      }
+    },
+    async prev() {
+      try {
+        await Prev();
+      } catch (e) {
+        lastError = errorMessage(e);
       }
     },
   };

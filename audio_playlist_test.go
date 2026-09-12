@@ -1,0 +1,243 @@
+package main
+
+import (
+	"context"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+
+	"changeme/backend/inits"
+	"changeme/backend/models"
+)
+
+// testTrackSeq — см. uniqueTestDuration.
+var testTrackSeq atomic.Int64
+
+// createTestTrack импортирует минимальный тестовый wav и возвращает его id —
+// общий шаг для тестов плейлистов, которым нужен настоящий (пусть и
+// тривиальный) AudioTrack, чтобы Preload("Items.Track") давало осмысленные
+// данные.
+//
+// ⚠️ paths.MediaDir() мемоизирован (sync.Once) на весь процесс тестов
+// (audio_import_test.go, TestMain) — один физический каталог на все тесты
+// в бинарнике. writeTestWav с одинаковой длительностью в разных тестах даёт
+// БИТ-В-БИТ одинаковое содержимое, а значит и одинаковый sha256 → дедуп по
+// хешу склеил бы их в один трек, а на Windows второй rename на уже
+// существующее (и не факт что закрытое — см. audio_autoadvance.go, pending
+// держит декодер открытым фоново) имя падает как "Access is denied". Поэтому
+// каждый вызов получает заведомо уникальную длительность.
+func uniqueTestDuration() float64 {
+	testTrackSeq.Add(1)
+	return 0.05 + float64(testTrackSeq.Load())*0.001
+}
+
+func createTestTrack(t *testing.T, name string) uint {
+	t.Helper()
+	a := &AudioService{}
+	src := filepath.Join(t.TempDir(), name+".wav")
+	writeTestWav(t, src, uniqueTestDuration())
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack(%s): %s", name, res.Error)
+	}
+	return res.Track.ID
+}
+
+// TestAddToPlaylistAssignsNextPosition — план: "AddToPlaylist даёт
+// Position = n+1".
+func TestAddToPlaylistAssignsNextPosition(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	playlist := a.CreatePlaylist("Тест")
+	if playlist == nil {
+		t.Fatal("CreatePlaylist returned nil")
+	}
+	t1 := createTestTrack(t, "t1")
+	t2 := createTestTrack(t, "t2")
+	t3 := createTestTrack(t, "t3")
+
+	p1 := a.AddToPlaylist(float32(playlist.ID), float32(t1))
+	if len(p1.Items) != 1 || p1.Items[0].Position != 1 {
+		t.Fatalf("after first add: items=%+v", p1.Items)
+	}
+
+	a.AddToPlaylist(float32(playlist.ID), float32(t2))
+	p3 := a.AddToPlaylist(float32(playlist.ID), float32(t3))
+	if len(p3.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(p3.Items))
+	}
+	for i, it := range p3.Items {
+		if it.Position != i+1 {
+			t.Errorf("item %d: Position = %d, want %d", i, it.Position, i+1)
+		}
+	}
+	if p3.Items[2].TrackId != t3 {
+		t.Errorf("last item trackId = %d, want %d (Position должен идти n+1, не в начало)", p3.Items[2].TrackId, t3)
+	}
+}
+
+// TestRemoveFromPlaylistRenumbers — план: "RemoveFromPlaylist перенумеровывает
+// 1..n".
+func TestRemoveFromPlaylistRenumbers(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	playlist := a.CreatePlaylist("Тест")
+	var trackIds []uint
+	for i := 0; i < 4; i++ {
+		trackIds = append(trackIds, createTestTrack(t, "t"))
+	}
+	var itemIds []uint
+	for _, tid := range trackIds {
+		p := a.AddToPlaylist(float32(playlist.ID), float32(tid))
+		itemIds = append(itemIds, p.Items[len(p.Items)-1].ID)
+	}
+
+	// Удаляем второй по счёту (Position=2) — оставшиеся три обязаны стать
+	// 1,2,3 без дырки на месте удалённого.
+	result := a.RemoveFromPlaylist(float32(itemIds[1]))
+	if len(result.Items) != 3 {
+		t.Fatalf("expected 3 items after removal, got %d", len(result.Items))
+	}
+	for i, it := range result.Items {
+		if it.Position != i+1 {
+			t.Errorf("item %d: Position = %d, want %d", i, it.Position, i+1)
+		}
+		if it.ID == itemIds[1] {
+			t.Error("removed item still present")
+		}
+	}
+}
+
+// TestReorderPlaylistExactOrder — план: "ReorderPlaylist переставляет ровно
+// по переданному порядку" (не парными свопами, как куплеты).
+func TestReorderPlaylistExactOrder(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	playlist := a.CreatePlaylist("Тест")
+	var itemIds []uint
+	for i := 0; i < 4; i++ {
+		tid := createTestTrack(t, "t")
+		p := a.AddToPlaylist(float32(playlist.ID), float32(tid))
+		itemIds = append(itemIds, p.Items[len(p.Items)-1].ID)
+	}
+	// itemIds сейчас в порядке [0,1,2,3] (Position 1..4). Двигаем последний
+	// элемент в начало целиком — не соседний своп, а перестановка через весь
+	// список одним действием.
+	newOrder := []uint{itemIds[3], itemIds[0], itemIds[1], itemIds[2]}
+	result := a.ReorderPlaylist(float32(playlist.ID), newOrder)
+	if len(result.Items) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(result.Items))
+	}
+	for i, it := range result.Items {
+		if it.ID != newOrder[i] {
+			t.Errorf("position %d: itemId = %d, want %d", i+1, it.ID, newOrder[i])
+		}
+		if it.Position != i+1 {
+			t.Errorf("item %d: Position = %d, want %d", it.ID, it.Position, i+1)
+		}
+	}
+}
+
+// TestRemoveTrackClearsPlaylistItems — план: "удаление трека вычищает его из
+// всех плейлистов".
+func TestRemoveTrackClearsPlaylistItems(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	p1 := a.CreatePlaylist("П1")
+	p2 := a.CreatePlaylist("П2")
+	trackId := createTestTrack(t, "shared")
+
+	a.AddToPlaylist(float32(p1.ID), float32(trackId))
+	a.AddToPlaylist(float32(p2.ID), float32(trackId))
+
+	if err := a.RemoveTrack(float32(trackId)); err != nil {
+		t.Fatalf("RemoveTrack: %v", err)
+	}
+
+	var count int64
+	if err := inits.DB.Model(&models.PlaylistItem{}).Where("track_id = ?", trackId).Count(&count).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("PlaylistItem rows referencing removed track still present: %d", count)
+	}
+}
+
+// TestRemovePlayingItemStopsPlayback — план: "удаление играющего элемента
+// останавливает воспроизведение".
+func TestRemovePlayingItemStopsPlayback(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	playlist := a.CreatePlaylist("Тест")
+	trackId := createTestTrack(t, "playing")
+	p := a.AddToPlaylist(float32(playlist.ID), float32(trackId))
+	itemId := p.Items[0].ID
+
+	if err := a.Play(float32(playlist.ID), float32(itemId)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Fatalf("expected playing, got %q", st.Status)
+	}
+
+	a.RemoveFromPlaylist(float32(itemId))
+
+	if st := a.State(); st.Status != string(statusIdle) {
+		t.Errorf("removing the playing item should stop playback, status = %q", st.Status)
+	}
+}
+
+// TestNextPrevNavigation проверяет ручную навигацию (Next/Prev) — она
+// работает независимо от AutoAdvance (это действие оператора, не автоматика)
+// и оборачивается по Loop так же, как автопереход.
+func TestNextPrevNavigation(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	playlist := models.Playlist{Name: "Навигация", Loop: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	var itemIds []uint
+	for i := 0; i < 3; i++ {
+		tid := createTestTrack(t, "nav")
+		item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: tid, Position: i + 1}
+		if err := inits.DB.Create(&item).Error; err != nil {
+			t.Fatalf("create item: %v", err)
+		}
+		itemIds = append(itemIds, item.ID)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[0])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+
+	if err := a.Next(); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if st := a.State(); st.ItemId != itemIds[1] {
+		t.Fatalf("after Next: ItemId = %d, want %d", st.ItemId, itemIds[1])
+	}
+
+	if err := a.Prev(); err != nil {
+		t.Fatalf("Prev: %v", err)
+	}
+	if st := a.State(); st.ItemId != itemIds[0] {
+		t.Fatalf("after Prev: ItemId = %d, want %d", st.ItemId, itemIds[0])
+	}
+
+	// Prev с первого элемента при Loop=true оборачивается на последний.
+	if err := a.Prev(); err != nil {
+		t.Fatalf("Prev (wrap): %v", err)
+	}
+	if st := a.State(); st.ItemId != itemIds[2] {
+		t.Fatalf("after wrap Prev: ItemId = %d, want %d", st.ItemId, itemIds[2])
+	}
+}

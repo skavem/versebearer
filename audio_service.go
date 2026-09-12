@@ -30,6 +30,10 @@ type AudioService struct {
 	volSaveMu    sync.Mutex
 	volSaveTimer *time.Timer
 
+	// pendingMu/pending — этап 4 (автопереход), см. audio_autoadvance.go.
+	pendingMu sync.Mutex
+	pending   *pendingNext
+
 	// quit останавливает watchPlayerEvents при ServiceShutdown. Закрывается
 	// ровно один раз; done/lost самих закрывать нельзя — data-колбэк malgo
 	// может успеть отправить в них до Uninit устройства.
@@ -37,16 +41,20 @@ type AudioService struct {
 }
 
 func NewAudioService() *AudioService {
-	// Громкость читаем из GlobalState сразу: inits.DB готова к этому
-	// моменту (открывается в package init(), до main()). Ошибка чтения —
-	// не повод падать, откатываемся на полную громкость, как и сама
-	// колонка по умолчанию (models.GlobalState.AudioVolume `gorm:"default:1"`).
+	// Громкость и выбранное устройство читаем из GlobalState сразу:
+	// inits.DB готова к этому моменту (открывается в package init(), до
+	// main()). Ошибка чтения — не повод падать: откатываемся на полную
+	// громкость (как и сама колонка по умолчанию,
+	// models.GlobalState.AudioVolume `gorm:"default:1"`) и системное
+	// устройство по умолчанию (пустая строка).
 	vol := 1.0
+	deviceId := ""
 	var gs models.GlobalState
 	if err := inits.DB.First(&gs, 1).Error; err == nil {
 		vol = gs.AudioVolume
+		deviceId = gs.AudioDeviceId
 	}
-	a := &AudioService{pl: newPlayer(vol), quit: make(chan struct{})}
+	a := &AudioService{pl: newPlayer(vol, deviceId), quit: make(chan struct{})}
 	go a.watchPlayerEvents()
 	return a
 }
@@ -67,9 +75,7 @@ func (a *AudioService) emit(name string, data any) {
 
 // watchPlayerEvents — единственный получатель асинхронных уведомлений
 // движка: "трек доиграл" (done, с проверкой поколения — И4) и "устройство
-// пропало" (lost, этап 3 использует его полнее — здесь пока просто честно
-// сообщаем оператору и переходим в idle, а не оставляем UI показывать
-// "играет" вечно). Оба канала обслуживаются одной горутиной, а не data-
+// пропало" (lost). Оба канала обслуживаются одной горутиной, а не data-
 // колбэком malgo (И2: там нельзя ни p.mu, ни emit синхронно). quit
 // останавливает горутину при ServiceShutdown, чтобы она не дёргала emit
 // после разборки приложения.
@@ -77,18 +83,36 @@ func (a *AudioService) watchPlayerEvents() {
 	for {
 		select {
 		case gen := <-a.pl.done:
-			if oldSrc, changed := a.pl.finishIfCurrent(gen); changed {
-				if oldSrc != nil {
-					oldSrc.Close() // файловый IO — вне p.mu (И2/И3), мы уже не под ним
-				}
+			oldSrc, finished, nextGen, changed := a.pl.finishIfCurrent(gen)
+			if !changed {
+				continue // устаревшее поколение — И4, кто-то уже успел вмешаться
+			}
+			// tryAdvance (этап 4) — либо подхватывает заранее подготовленный
+			// следующий элемент плейлиста (AutoAdvance), либо честно
+			// сообщает, что подхватывать нечего (false), и тогда это самый
+			// обычный конец воспроизведения.
+			advanced := a.tryAdvance(finished, nextGen)
+			if oldSrc != nil {
+				oldSrc.Close() // файловый IO — вне p.mu (И2/И3), мы уже не под ним
+			}
+			if !advanced {
 				a.emit("audio_stopped", nil)
 			}
 		case <-a.pl.lost:
+			// Устройство пропало само (выдернули провод, забрало другое
+			// приложение) — не наш Stop()/SetDevice() (expectStop=false,
+			// см. onDeviceStopped). closeDevice гарантирует, что следующий
+			// Play() полноценно переоткроет устройство через ensureDevice, а
+			// не решит, что deviceOpen==true и всё ещё работает. Тихой
+			// подмены на другое устройство не делаем (план, этап 3).
+			a.invalidatePending()
 			oldSrc := a.pl.forceIdleOnDeviceLost()
 			if oldSrc != nil {
 				oldSrc.Close()
 			}
-			a.emit("audio_error", "устройство вывода пропало")
+			a.pl.deviceLost.Store(true)
+			a.pl.closeDevice()
+			a.emit("audio_device_lost", nil)
 		case <-a.quit:
 			return
 		}
@@ -106,6 +130,7 @@ func (a *AudioService) watchPlayerEvents() {
 // отложенное закрытие поискового индекса, см. main.go), и только в конце
 // остановить горутину-получатель событий.
 func (a *AudioService) ServiceShutdown() error {
+	a.invalidatePending() // иначе декодер заранее открытого следующего трека утекает открытым файловым хендлом
 	if oldSrc := a.pl.stop(); oldSrc != nil {
 		oldSrc.Close()
 	}
@@ -161,6 +186,7 @@ func (a *AudioService) State() PlayerState {
 		DurationMs: p.durationMs,
 		NextTitle:  p.nextTitle,
 		Volume:     p.currentVolumeLocked(),
+		DeviceName: p.deviceName,
 	}
 	devRate := p.devRate
 	p.mu.Unlock()
@@ -171,10 +197,17 @@ func (a *AudioService) State() PlayerState {
 	// Пик читается и сбрасывается атомарно (Swap): следующее чтение должно
 	// увидеть максимум только с этого момента, а не унаследовать старый.
 	st.Peak = math.Float64frombits(p.peak.Swap(0))
-	// Выбор устройства — этап 3; пока плеер всегда играет в системное по
-	// умолчанию.
-	st.DeviceName = "Системное по умолчанию"
-	st.DeviceLost = false
+	if st.DeviceName == "" {
+		// Устройство ещё ни разу не открывалось в этой сессии (ленивое
+		// открытие — только при первом Play): показываем то, что реально
+		// будет открыто, не выдумывая имя ещё не запрошенного устройства.
+		if p.selectedDevice() == "" {
+			st.DeviceName = systemDefaultDeviceName
+		} else {
+			st.DeviceName = "Устройство ещё не открыто"
+		}
+	}
+	st.DeviceLost = p.deviceLost.Load()
 	return st
 }
 
@@ -234,7 +267,15 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	if !installed {
 		return nil // обогнали более новым play/stop/seek — не ошибка (И4)
 	}
+	// Предыдущий заранее подготовленный "следующий" (для другого трека) уже
+	// не актуален — этот Play() мог быть ручным вмешательством оператора, а
+	// не автопереходом.
+	a.invalidatePending()
 	a.emit("audio_track_changed", a.State())
+	// Этап 4: если playlistId принадлежит плейлисту с AutoAdvance, заранее
+	// открыть следующий элемент — decodeExt дорог (И3), и делать это по
+	// приходу done означало бы дыру между треками (см. audio_autoadvance.go).
+	a.preparePendingNext(playlistId, itemId)
 	return nil
 }
 
@@ -247,6 +288,7 @@ func (a *AudioService) Toggle() {
 // не закрывается: следующий Play переиспользует уже открытое — дешевле, чем
 // поднимать WASAPI заново на каждый клик.
 func (a *AudioService) Stop() {
+	a.invalidatePending()
 	oldSrc := a.pl.stop()
 	if oldSrc != nil {
 		oldSrc.Close() // файловый IO — вне p.mu (И2/И3)
@@ -403,8 +445,14 @@ func (a *AudioService) RemoveTrack(idF float32) error {
 	// a.pl может быть nil в тестах, которые конструируют AudioService{} без
 	// NewAudioService (им движок не нужен) — RemoveTrack тогда просто
 	// пропускает шаг остановки, звука ни в одном таком тесте не бывает.
-	if a.pl != nil && a.pl.isCurrentTrack(id) {
-		a.Stop()
+	if a.pl != nil {
+		if a.pl.isCurrentTrack(id) {
+			a.Stop()
+		}
+		// Трек мог быть не текущим, а уже заранее открытым "следующим"
+		// (этап 4, автопереход) — тот же sharing-violation риск на Windows,
+		// только для decodeExt внутри buildPendingNext, а не Play.
+		a.invalidatePendingForTrack(id)
 	}
 
 	if err := inits.DB.Where("track_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {

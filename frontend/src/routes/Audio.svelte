@@ -1,8 +1,10 @@
 <script lang="ts">
   import type { AudioTrack } from "$lib/bindings/changeme/backend/models";
+  import AudioDeviceSelect from "$lib/components/AudioDeviceSelect.svelte";
   import EditTrackModal from "$lib/components/EditTrackModal.svelte";
   import List from "$lib/components/List.svelte";
   import MuiIcon from "$lib/components/MuiIcon.svelte";
+  import PlaylistPanel from "$lib/components/PlaylistPanel.svelte";
   import { audioStore } from "$lib/stores/audioStore.svelte";
 
   const tracks = $derived(audioStore.tracks);
@@ -10,6 +12,24 @@
   let editingTrack = $state<AudioTrack | null>(null);
   let trackToDelete = $state<AudioTrack | null>(null);
   let importErrors = $state<string[]>([]);
+
+  // subView переключает вкладку между медиатекой (этап 1) и плейлистами
+  // (этап 4) — устройство вывода и ошибка общие для обеих, поэтому живут в
+  // шапке выше переключателя, а не дублируются в каждой подвкладке.
+  let subView = $state<"library" | "playlists">("library");
+
+  // Устройства/плейлисты запрашиваются лениво, только пока открыта вкладка
+  // «Звук» — не при module-init audioStore (см. комментарий там):
+  // ListDevices() поднимает malgo.InitContext, а это не должно случаться на
+  // машине без звуковой карты раньше, чем оператор реально сюда зашёл.
+  // Опрос PlayerState (startPolling) по той же причине не крутится, пока
+  // вкладка не открыта.
+  $effect(() => {
+    audioStore.refreshDevices();
+    audioStore.refreshPlaylists();
+    audioStore.startPolling();
+    return () => audioStore.stopPolling();
+  });
 
   function formatDuration(ms: number): string {
     if (!ms || ms <= 0) return "—";
@@ -41,34 +61,54 @@
 </script>
 
 <div class="flex h-[calc(100vh-4rem)] flex-col gap-2 p-4">
-  <div class="flex items-center justify-between">
-    <h2 class="text-lg font-semibold">Медиатека фонограмм</h2>
-
-    {#if audioStore.importing}
-      <div class="flex items-center gap-2">
-        <progress
-          class="progress progress-primary w-40"
-          value={audioStore.importProgress?.done ?? 0}
-          max={audioStore.importProgress?.total ?? 1}
-        ></progress>
-        <span class="text-xs opacity-70">
-          {audioStore.importProgress?.done ?? 0} из {audioStore.importProgress
-            ?.total ?? 0}
-        </span>
-        <button
-          class="btn btn-ghost btn-xs"
-          onclick={() => audioStore.cancelImport()}
-        >
-          Отмена
-        </button>
-      </div>
-    {:else}
-      <button class="btn btn-outline btn-sm gap-1" onclick={doImport}>
-        <MuiIcon name="add" style="font-size: 1.15rem" />
-        Импорт
+  <div class="flex items-center justify-between gap-2">
+    <div class="tabs tabs-boxed tabs-sm w-fit">
+      <button
+        class="tab {subView === 'library' ? 'tab-active' : ''}"
+        onclick={() => (subView = "library")}
+      >
+        Медиатека
       </button>
-    {/if}
+      <button
+        class="tab {subView === 'playlists' ? 'tab-active' : ''}"
+        onclick={() => (subView = "playlists")}
+      >
+        Плейлисты
+      </button>
+    </div>
+    <AudioDeviceSelect />
   </div>
+
+  {#if subView === "library"}
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Медиатека фонограмм</h2>
+
+      {#if audioStore.importing}
+        <div class="flex items-center gap-2">
+          <progress
+            class="progress progress-primary w-40"
+            value={audioStore.importProgress?.done ?? 0}
+            max={audioStore.importProgress?.total ?? 1}
+          ></progress>
+          <span class="text-xs opacity-70">
+            {audioStore.importProgress?.done ?? 0} из {audioStore
+              .importProgress?.total ?? 0}
+          </span>
+          <button
+            class="btn btn-ghost btn-xs"
+            onclick={() => audioStore.cancelImport()}
+          >
+            Отмена
+          </button>
+        </div>
+      {:else}
+        <button class="btn btn-outline btn-sm gap-1" onclick={doImport}>
+          <MuiIcon name="add" style="font-size: 1.15rem" />
+          Импорт
+        </button>
+      {/if}
+    </div>
+  {/if}
 
   {#if importErrors.length > 0}
     <div class="alert alert-error py-2 text-sm">
@@ -93,55 +133,62 @@
     </div>
   {/if}
 
-  <div class="min-h-0 flex-1">
-    {#if tracks.loading}
-      <div class="flex h-full items-center justify-center opacity-60">
-        Загрузка…
-      </div>
-    {:else if tracks.list.length === 0}
-      <div class="flex h-full items-center justify-center opacity-60">
-        Пока нет фонограмм — нажмите «Импорт»
-      </div>
-    {:else}
-      <List
-        items={tracks.list}
-        activeItem={tracks.active}
-        getName={(t) => t.title || t.fileName}
-        onClick={(t) => (tracks.active = t)}
-      >
-        {#snippet leftMark(t)}
-          <span class="badge badge-neutral badge-sm font-mono"
-            >{formatDuration(t.durationMs)}</span
-          >
-        {/snippet}
-        {#snippet rightMark(t)}
-          <div class="flex flex-row items-center gap-1">
-            <span class="hidden text-xs opacity-50 sm:inline group-hover/item:hidden"
-              >{formatSize(t.sizeBytes)}</span
+  {#if subView === "library"}
+    <div class="min-h-0 flex-1">
+      {#if tracks.loading}
+        <div class="flex h-full items-center justify-center opacity-60">
+          Загрузка…
+        </div>
+      {:else if tracks.list.length === 0}
+        <div class="flex h-full items-center justify-center opacity-60">
+          Пока нет фонограмм — нажмите «Импорт»
+        </div>
+      {:else}
+        <List
+          items={tracks.list}
+          activeItem={tracks.active}
+          getName={(t) => t.title || t.fileName}
+          onClick={(t) => (tracks.active = t)}
+        >
+          {#snippet leftMark(t)}
+            <span class="badge badge-neutral badge-sm font-mono"
+              >{formatDuration(t.durationMs)}</span
             >
-            <button
-              class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
-              onclick={(e) => {
-                editingTrack = t;
-                e.stopPropagation();
-              }}
-              title="Редактировать"
-              ><MuiIcon name="edit" style="font-size: 1rem" /></button
-            >
-            <button
-              class="btn btn-error btn-xs hidden px-1 text-white group-hover/item:block"
-              onclick={(e) => {
-                trackToDelete = t;
-                e.stopPropagation();
-              }}
-              title="Удалить фонограмму"
-              ><MuiIcon name="delete" style="font-size: 1rem" /></button
-            >
-          </div>
-        {/snippet}
-      </List>
-    {/if}
-  </div>
+          {/snippet}
+          {#snippet rightMark(t)}
+            <div class="flex flex-row items-center gap-1">
+              <span
+                class="hidden text-xs opacity-50 sm:inline group-hover/item:hidden"
+                >{formatSize(t.sizeBytes)}</span
+              >
+              <button
+                class="btn btn-neutral btn-xs hidden px-1 text-white group-hover/item:block"
+                onclick={(e) => {
+                  editingTrack = t;
+                  e.stopPropagation();
+                }}
+                title="Редактировать"
+                ><MuiIcon name="edit" style="font-size: 1rem" /></button
+              >
+              <button
+                class="btn btn-error btn-xs hidden px-1 text-white group-hover/item:block"
+                onclick={(e) => {
+                  trackToDelete = t;
+                  e.stopPropagation();
+                }}
+                title="Удалить фонограмму"
+                ><MuiIcon name="delete" style="font-size: 1rem" /></button
+              >
+            </div>
+          {/snippet}
+        </List>
+      {/if}
+    </div>
+  {:else}
+    <div class="min-h-0 flex-1">
+      <PlaylistPanel />
+    </div>
+  {/if}
 </div>
 
 <EditTrackModal bind:track={editingTrack} />

@@ -21,9 +21,9 @@ import (
 // применении к самому устройству. rate — частота, которую в бою вернул бы
 // dev.SampleRate(). ctx/dev остаются nil и ни разу не разыменовываются:
 // все обращения к ним в audio_device.go идут под "if dev/ctx != nil".
-func fakeOpenDevice(rate uint32) func() (*malgo.AllocatedContext, *malgo.Device, uint32, error) {
-	return func() (*malgo.AllocatedContext, *malgo.Device, uint32, error) {
-		return nil, nil, rate, nil
+func fakeOpenDevice(rate uint32) func(string) (*malgo.AllocatedContext, *malgo.Device, uint32, string, error) {
+	return func(string) (*malgo.AllocatedContext, *malgo.Device, uint32, string, error) {
+		return nil, nil, rate, "Тестовое устройство", nil
 	}
 }
 
@@ -114,8 +114,8 @@ func TestPlayIsIdempotent(t *testing.T) {
 func TestAudioServiceWithoutDevice(t *testing.T) {
 	setupPlayerTestDB(t)
 	a := NewAudioService()
-	a.pl.openDevice = func() (*malgo.AllocatedContext, *malgo.Device, uint32, error) {
-		return nil, nil, 0, errors.New("нет звуковой карты")
+	a.pl.openDevice = func(string) (*malgo.AllocatedContext, *malgo.Device, uint32, string, error) {
+		return nil, nil, 0, "", errors.New("нет звуковой карты")
 	}
 
 	if err := a.Play(1, 999999); err == nil {
@@ -148,7 +148,7 @@ func TestAudioServiceWithoutDevice(t *testing.T) {
 // и тест бы упал. Плюс И4: устаревшее поколение из done молча отбрасывается,
 // не воскрешая уже остановленный трек.
 func TestStopClosesSourceOutsideMuAndDropsStaleDone(t *testing.T) {
-	p := newPlayer(1.0)
+	p := newPlayer(1.0, "")
 	a := &AudioService{pl: p}
 
 	var closed atomic.Bool
@@ -179,7 +179,7 @@ func TestStopClosesSourceOutsideMuAndDropsStaleDone(t *testing.T) {
 
 	// "Трек доиграл" для того самого gen, который Stop() уже инвалидировал —
 	// должно быть молча отброшено (И4).
-	if _, changed := p.finishIfCurrent(gen); changed {
+	if _, _, _, changed := p.finishIfCurrent(gen); changed {
 		t.Error("finishIfCurrent must drop a stale generation (И4), not resurrect a stopped track")
 	}
 }
@@ -276,7 +276,7 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 	const rate = beep.SampleRate(8000)
 	const seekTo = 3000
 
-	p := newPlayer(1.0)
+	p := newPlayer(1.0, "")
 	p.devRate = rate
 	src := &sineSrc{rate: int(rate), freq: 440}
 	gen := p.nextGen()
@@ -311,7 +311,7 @@ func TestSeekRebuildNoStaleTail(t *testing.T) {
 		t.Fatal("no samples after seek")
 	}
 
-	refP := newPlayer(1.0)
+	refP := newPlayer(1.0, "")
 	refP.devRate = rate
 	refSrc := &sineSrc{rate: int(rate), freq: 440}
 	if err := refSrc.Seek(seekTo); err != nil {

@@ -75,7 +75,39 @@ type player struct {
 	// устройству): по умолчанию реально открывает malgo (audio_device.go,
 	// defaultOpenDevice), в TestAudioServiceWithoutDevice подменяется на
 	// функцию, возвращающую ошибку — без звуковой карты.
-	openDevice func() (*malgo.AllocatedContext, *malgo.Device, uint32, error)
+	// openDevice принимает выбранное устройство (malgo DeviceID.String(),
+	// "" — системное по умолчанию) и возвращает вместе с контекстом/девайсом
+	// его человекочитаемое имя — этап 3. Сопоставление строки с реальным
+	// malgo.DeviceID делает сама реализация (defaultOpenDevice,
+	// audio_device.go), потому что DeviceID.String() необратим (обрезает
+	// хвостовые нули) и восстановить байты id из строки нельзя — только
+	// найти совпадение перебором свежего списка устройств.
+	openDevice func(deviceId string) (*malgo.AllocatedContext, *malgo.Device, uint32, string, error)
+	// listPlaybackDevices — точка внедрения для тестов (И6), как и openDevice:
+	// по умолчанию реально опрашивает malgo (audio_device.go,
+	// defaultListPlaybackDevices), в тестах подменяется.
+	listPlaybackDevices func() ([]malgo.DeviceInfo, error)
+
+	// selectedDeviceId — устройство, которое должно открыться в следующем
+	// ensureDevice (или уже открыто под этим именем). Не участвует в
+	// realtime-цикле (onSamples его не читает), но живёт под тем же p.mu,
+	// что и остальные поля текущего состояния плеера — здесь это просто
+	// разделяемая между горутинами строка, а не что-то, что нужно защищать
+	// отдельным мьютексом.
+	selectedDeviceId string
+	// deviceName — человекочитаемое имя УЖЕ открытого устройства (или
+	// последнего, что открывалось), выставляется в ensureDevice. PlayerState
+	// читает его в State(), а не пересчитывает через ListDevices() — тот
+	// ходит в malgo и не должен вызываться 4 раза в секунду.
+	deviceName string
+	// deviceLost — этап 3: устройство пропало само (see onDeviceStopped),
+	// не наш Stop(). atomic — читается из State() без p.mu, как peak/pos.
+	// Сбрасывается в false при следующем успешном ensureDevice (см.
+	// комментарий про expectStop в ensureDevice — деталь та же: общий на
+	// весь плеер флаг обязан сбрасываться на каждое удачное открытие,
+	// иначе после первой же смены устройства детект пропажи умирает
+	// навсегда).
+	deviceLost atomic.Bool
 
 	mix  *beep.Mixer     // постоянный источник data-колбэка: пустой микшер отдаёт тишину (Mixer.stopWhenEmpty=false по умолчанию)
 	mvol *effects.Volume // общая громкость, живёт между треками
@@ -126,20 +158,82 @@ type trackMeta struct {
 // newPlayer создаёт движок с постоянным микшером/громкостью/паузой —
 // этим полям не нужно устройство, поэтому SetVolume работает сразу после
 // создания сервиса, ещё до первого Play. initialVolume — общая громкость,
-// прочитанная из GlobalState.AudioVolume при старте сервиса (см. audio_service.go).
-func newPlayer(initialVolume float64) *player {
+// initialDeviceId — последнее выбранное устройство, оба прочитаны из
+// GlobalState при старте сервиса (см. audio_service.go).
+func newPlayer(initialVolume float64, initialDeviceId string) *player {
 	p := &player{
-		mix:  &beep.Mixer{},
-		buf:  make([][2]float64, 1024),
-		done: make(chan uint64, 1),
-		lost: make(chan struct{}, 1),
+		mix:              &beep.Mixer{},
+		buf:              make([][2]float64, 1024),
+		done:             make(chan uint64, 1),
+		lost:             make(chan struct{}, 1),
+		selectedDeviceId: initialDeviceId,
 	}
 	p.ctrl = &beep.Ctrl{Streamer: p.mix}
 	p.mvol = &effects.Volume{Streamer: p.ctrl}
 	p.status = statusIdle
 	p.openDevice = p.defaultOpenDevice
+	p.listPlaybackDevices = defaultListPlaybackDevices
 	p.setVolumeLocked(initialVolume)
 	return p
+}
+
+// selectedDevice читает выбранное устройство под p.mu — GetDeviceId и
+// ensureDevice.
+func (p *player) selectedDevice() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.selectedDeviceId
+}
+
+// setSelectedDevice — SetDevice: запоминает новый выбор. Не трогает
+// deviceOpen/dev/ctx сама по себе — вызывающий (AudioService.SetDevice)
+// обязан отдельно закрыть уже открытое устройство (closeDevice, вне p.mu —
+// И2), чтобы следующий ensureDevice открыл именно это, а не продолжал
+// молча играть на старом.
+func (p *player) setSelectedDevice(id string) {
+	p.mu.Lock()
+	p.selectedDeviceId = id
+	p.mu.Unlock()
+	p.deviceLost.Store(false) // оператор сам разобрался с пропажей, выбрав устройство
+}
+
+// currentItem — playlistId/itemId сейчас загруженного (играющего или на
+// паузе) элемента, если такой есть. Использует Next/Prev/SetPlaylistFlags,
+// которым нужно знать, что именно сейчас играет, не читая приватные поля
+// напрямую.
+func (p *player) currentItem() (playlistId, itemId uint, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.playlistId, p.itemId, p.status != statusIdle
+}
+
+// isCurrentItem — как isCurrentTrack, но по itemId элемента плейлиста:
+// RemoveFromPlaylist должен остановить воспроизведение именно того элемента,
+// который удаляют, даже если formально это тот же trackId, что где-то ещё в
+// плейлисте (isCurrentTrack такое совпадение не различил бы).
+func (p *player) isCurrentItem(itemId uint) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status != statusIdle && p.itemId == itemId
+}
+
+// isCurrentPlaylist — RemovePlaylist/ReorderPlaylist: остановить, если сейчас
+// играет (или на паузе) что-то из именно этого плейлиста.
+func (p *player) isCurrentPlaylist(playlistId uint) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status != statusIdle && p.playlistId == playlistId
+}
+
+// setNextTitle — этап 4: заголовок элемента, который автопереход поставит
+// следующим (или "", если следующего нет/автопереход выключен). Отдельный
+// сеттер, а не прямое присваивание поля: вызывается ПОСЛЕ startTrack, который
+// сам обнуляет nextTitle как часть сброса нового трека — порядок вызовов
+// важен и хочется, чтобы он был виден в одном месте.
+func (p *player) setNextTitle(title string) {
+	p.mu.Lock()
+	p.nextTitle = title
+	p.mu.Unlock()
 }
 
 // setVolumeLocked применяет общую громкость (слайдер 0..1) к mvol. Вызывать
@@ -366,16 +460,35 @@ func (p *player) resumeChain(gen uint64, chain beep.Streamer, expectedSrc beep.S
 // в собранной цепочке). Чужое (устаревшее) поколение молча отбрасывается —
 // И4: оператор мог успеть нажать Стоп или запустить другой трек, пока это
 // уведомление летело из data-колбэка в горутину-получателя.
-func (p *player) finishIfCurrent(gen uint64) (oldSrc beep.StreamSeekCloser, changed bool) {
+//
+// finished — playlistId/itemId/trackId только что завершившегося элемента:
+// AudioService.tryAdvance (этап 4) использует его, чтобы понять, какой
+// заранее подготовленный "следующий" трек имелся в виду, ДО того как
+// resetTrackFieldsLocked обнулит эти поля.
+//
+// nextGen — новое поколение, зарезервированное В ТОЙ ЖЕ критической секции
+// (см. И4, по аналогии со snapshotForSeek): если tryAdvance решит поставить
+// следующий трек, он обязан использовать именно nextGen, а не звать nextGen()
+// отдельно. Иначе между "трек доиграл" и "поставили следующий" остаётся окно,
+// где конкурентный Stop()/Play() резервирует СВОЙ, более новый gen, а
+// tryAdvance следом всё равно резервирует свой (ещё более новый) и
+// перезаписывает решение оператора. Резервируя nextGen здесь же, под тем же
+// p.mu, любой конкурентный Stop()/Play() либо успевает раньше (и его gen
+// оказывается больше nextGen — startTrack в tryAdvance тогда откажет), либо
+// позже (и увидит уже расставленное tryAdvance состояние) — обычная
+// сериализация мьютексом, без отдельного зазора для гонки.
+func (p *player) finishIfCurrent(gen uint64) (oldSrc beep.StreamSeekCloser, finished trackMeta, nextGen uint64, changed bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if gen != p.gen {
-		return nil, false
+		return nil, trackMeta{}, 0, false
 	}
 	oldSrc = p.src
+	finished = trackMeta{trackId: p.trackId, playlistId: p.playlistId, itemId: p.itemId, durationMs: p.durationMs}
 	p.mix.Clear()
 	p.resetTrackFieldsLocked()
-	return oldSrc, true
+	p.gen++
+	return oldSrc, finished, p.gen, true
 }
 
 // stop — общая часть AudioService.Stop: инвалидирует поколение (И4),
