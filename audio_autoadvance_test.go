@@ -571,7 +571,11 @@ func TestInvalidatePendingClosesDecoderOnStopSetDeviceShutdown(t *testing.T) {
 		pn, closed := newFakePending()
 		a.pending = pn
 
-		if err := a.SetDevice(""); err != nil {
+		// Другой id, не "" (текущий выбор newPlayer(1.0, "")): HIGH №3
+		// обзора сделал SetDevice с УЖЕ выбранным id ранним no-op — этот тест
+		// проверяет закрытие декодера при РЕАЛЬНОЙ смене устройства
+		// (no-op-путь проверяет TestSetDeviceSameIdIsNoop, audio_devices_test.go).
+		if err := a.SetDevice("other-device"); err != nil {
 			t.Fatalf("SetDevice: %v", err)
 		}
 

@@ -11,11 +11,13 @@ import (
 	"changeme/backend/paths"
 )
 
-// Медиатека фонограмм: чтение списка, правка метаданных, удаление. Отделено
-// от audio_service.go, где остались жизненный цикл сервиса и транспорт
-// (Play/Seek/FadeOutStop/громкость): к движку эти три метода обращаются
-// только чтобы остановить или инвалидировать то, что сейчас звучит, а в
-// остальном это обычная работа с БД и файлами, как в dbHandler.go.
+// Медиатека фонограмм: чтение списка, правка метаданных, удаление трека
+// (явное — RemoveTrack, и по исчезновению последней ссылки —
+// deleteTrackIfUnused, которую зовут мутации плейлиста). Отделено от
+// audio_service.go, где остались жизненный цикл сервиса и транспорт
+// (Play/Seek/FadeOutStop/громкость): к движку эти методы обращаются только
+// чтобы остановить или инвалидировать то, что сейчас звучит, а в остальном
+// это обычная работа с БД и файлами, как в dbHandler.go.
 // Импорт новых файлов — отдельно, в audio_import.go.
 
 // ListTracks возвращает медиатеку фонограмм. Ошибку БД не глотает молча:
@@ -140,25 +142,7 @@ func (a *AudioService) RemoveTrack(idF float32) error {
 		return err
 	}
 
-	// a.pl может быть nil в тестах, которые конструируют AudioService{} без
-	// NewAudioService (им движок не нужен) — RemoveTrack тогда просто
-	// пропускает шаг остановки, звука ни в одном таком тесте не бывает.
-	stopped := false
-	var pendingPlaylistId, pendingAfterItemId uint
-	pendingDropped := false
-	if a.pl != nil {
-		if a.pl.isCurrentTrack(id) {
-			a.Stop()
-			stopped = true
-		}
-		// Трек мог быть не текущим, а уже заранее открытым "следующим"
-		// (этап 4, автопереход) — тот же sharing-violation риск на Windows,
-		// только для decodeExt внутри fillPendingNext, а не для os.Remove
-		// ниже. Дропаем ДО удаления файла/строки (чтобы декодер точно
-		// закрылся раньше os.Remove), пересчитываем — ПОСЛЕ (когда БД уже не
-		// содержит удалённых ссылок, см. deleteTrackIfUnused).
-		pendingPlaylistId, pendingAfterItemId, pendingDropped = a.dropPendingForTrack(id)
-	}
+	hold := a.releaseTrackFile(id)
 
 	if err := inits.DB.Where("track_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
 		log.Println("RemoveTrack: error clearing playlist items", err)
@@ -174,14 +158,135 @@ func (a *AudioService) RemoveTrack(idF float32) error {
 		return err
 	}
 
-	// Стоп (isCurrentTrack) уже обнулил pending целиком через a.Stop() ->
-	// dropPending — нечего пересчитывать. Иначе, если удаляемый трек был
-	// pending каким-то другим, всё ещё играющим элементом, — пересчитываем,
-	// чтобы автопереход не остался без пары (см. audio_autoadvance.go).
-	if pendingDropped && !stopped {
-		a.refreshPending(pendingPlaylistId, pendingAfterItemId)
-	}
-
+	a.refreshPendingAfterRelease(hold)
 	a.emit("audio_tracks_update", a.ListTracks())
 	return nil
+}
+
+// trackFileHold — что пришлось остановить и закрыть, чтобы файл трека можно
+// было удалить (releaseTrackFile), и чей автопереход из-за этого остался без
+// пары (refreshPendingAfterRelease). Две половины разнесены во времени
+// намеренно: закрывать декодеры нужно ДО os.Remove, а пересчитывать
+// "следующий" — ПОСЛЕ удаления строк из БД, иначе refreshPending ответит по
+// данным, которые ещё содержат удаляемое.
+type trackFileHold struct {
+	stopped        bool
+	pendingDropped bool
+	playlistId     uint
+	afterItemId    uint
+}
+
+// releaseTrackFile закрывает всё, что держит файл трека открытым: играющий
+// декодер (если звучит именно он) и заранее подготовленный "следующий"
+// (этап 4, автопереход). Обязательный пролог любого удаления трека —
+// os.Remove на Windows падает с sharing violation, пока файл держит открытый
+// декодер, а ошибка эта тихая: строка из БД уйдёт, файл останется сиротой
+// навсегда.
+//
+// a.pl может быть nil в тестах, которые конструируют AudioService{} без
+// NewAudioService (им движок не нужен) — тогда освобождать нечего, звука ни в
+// одном таком тесте не бывает.
+func (a *AudioService) releaseTrackFile(trackId uint) trackFileHold {
+	if a.pl == nil {
+		return trackFileHold{}
+	}
+	var hold trackFileHold
+	if a.pl.isCurrentTrack(trackId) {
+		a.Stop()
+		hold.stopped = true
+	}
+	hold.playlistId, hold.afterItemId, hold.pendingDropped = a.dropPendingForTrack(trackId)
+	return hold
+}
+
+// refreshPendingAfterRelease — эпилог удаления трека, парный к
+// releaseTrackFile: вызывать ПОСЛЕ того, как удаление отражено в БД.
+//
+// Стоп уже сам обнулил pending целиком (a.Stop -> dropPending) — тогда
+// пересчитывать нечего. Иначе, если удалённый трек был заранее открытым
+// "следующим" для какого-то другого, всё ещё играющего элемента, —
+// пересчитываем, чтобы автопереход не остался без пары и не оборвал эфир
+// тишиной (см. audio_autoadvance.go).
+func (a *AudioService) refreshPendingAfterRelease(hold trackFileHold) {
+	if hold.pendingDropped && !hold.stopped {
+		a.refreshPending(hold.playlistId, hold.afterItemId)
+	}
+}
+
+// deleteUnusedTracksFor зовёт deleteTrackIfUnused по каждому УНИКАЛЬНОМУ
+// TrackId из items — общий хвост RemovePlaylist и ClearPlaylist: два
+// элемента одного плейлиста иногда ссылаются на один и тот же трек (тот же
+// файл добавили дважды). deleteTrackIfUnused и так безопасен на повторный
+// вызов (второй раз count уже 0, либо First не находит строку и тихо
+// возвращается), но не звать его дважды на один trackId дешевле.
+func (a *AudioService) deleteUnusedTracksFor(items []models.PlaylistItem) {
+	seen := make(map[uint]bool, len(items))
+	for _, it := range items {
+		if seen[it.TrackId] {
+			continue
+		}
+		seen[it.TrackId] = true
+		a.deleteTrackIfUnused(it.TrackId)
+	}
+}
+
+// deleteTrackIfUnused удаляет трек из медиатеки (файл + строка), если на
+// него не осталось ни одной ссылки (PlaylistItem.TrackId) ни в одном
+// плейлисте. Общий хвост RemoveFromPlaylist и ClearPlaylist — правка 1:
+// «удаление элемента из плейлиста удаляет трек и файл с диска, ЕСЛИ трек
+// больше не используется ни в одном плейлисте».
+//
+// ⚠️ Это единственное место, где решается "остановить или доиграть" для
+// удаляемого трека — и решение основано ИСКЛЮЧИТЕЛЬНО на физике: os.Remove
+// на Windows падает с sharing violation, пока файл держит открытый декодер.
+// Трек ещё используется в другом плейлисте (count>0, ранний возврат ниже) —
+// файл не удаляется, значит и стоп не нужен: если этот же трек играет через
+// какой-то другой элемент прямо сейчас, он спокойно доигрывает до конца,
+// просто не унаследует автопереход (см. tryAdvance/refreshPending).
+// Единственная ссылка — файл будет стёрт с диска, и тогда остановка
+// обязательна, если трек именно сейчас звучит (releaseTrackFile).
+func (a *AudioService) deleteTrackIfUnused(trackId uint) {
+	var count int64
+	if err := inits.DB.Model(&models.PlaylistItem{}).Where("track_id = ?", trackId).Count(&count).Error; err != nil {
+		log.Println("deleteTrackIfUnused: error counting references", err)
+		// MEDIUM №7 обзора: без этого сигнала ошибка подсчёта ссылок молча
+		// давала ранний return — трек не чистился вообще, а вызывающий
+		// (RemoveFromPlaylist/ClearPlaylist/RemovePlaylist) уже отчитался
+		// оператору об успехе. production собран с -H windowsgui — один
+		// log.Println здесь никто не увидит.
+		a.emit("audio_error", fmt.Sprintf("не удалось проверить ссылки на трек: %s", err.Error()))
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	var track models.AudioTrack
+	if err := inits.DB.First(&track, trackId).Error; err != nil {
+		return // уже удалён кем-то ещё — нечего делать
+	}
+
+	hold := a.releaseTrackFile(trackId)
+
+	if mediaDir, err := paths.MediaDir(); err == nil && track.FileName != "" {
+		// Отказ os.Remove — осознанно тихий (только лог, без audio_error,
+		// MEDIUM №7 обзора): sharing-violation на Windows решается ДО этого
+		// места (releaseTrackFile выше уже закрыл все декодеры, которые
+		// могли держать файл), а строка AudioTrack всё равно удаляется ниже
+		// — трек уйдёт из UI, и оператору сигналить уже не о чем действенном
+		// (RemoveTrack придерживается того же: "файл-сирота на диске
+		// безопаснее фантомной записи в медиатеке").
+		if err := os.Remove(filepath.Join(mediaDir, track.FileName)); err != nil && !os.IsNotExist(err) {
+			log.Println("deleteTrackIfUnused: error deleting file", err)
+		}
+	}
+
+	if err := inits.DB.Delete(&models.AudioTrack{}, trackId).Error; err != nil {
+		log.Println("deleteTrackIfUnused: error deleting row", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось удалить трек из медиатеки: %s", err.Error()))
+		return
+	}
+
+	a.refreshPendingAfterRelease(hold)
+	a.emit("audio_tracks_update", a.ListTracks())
 }

@@ -1,4 +1,8 @@
 <script lang="ts">
+  // PlaylistPanel — содержимое АКТИВНОГО плейлиста: его флаги, список
+  // элементов, импорт, перестановка. Выбор самого плейлиста (создать/
+  // переименовать/удалить) — в PlaylistSidebar слева; общее у них только
+  // audioStore.playlists, который оба читают напрямую из стора.
   import type {
     AudioTrack,
     Playlist,
@@ -9,6 +13,7 @@
   import ConfirmDeleteModal from "./ConfirmDeleteModal.svelte";
   import EditTrackModal from "./EditTrackModal.svelte";
   import MuiIcon from "./MuiIcon.svelte";
+  import PlaylistSidebar from "./PlaylistSidebar.svelte";
 
   // selectedItemId — подсветка для клавиатурной навигации вкладки «Звук»
   // (план, этап 6: ArrowUp/ArrowDown ходят по списку плейлиста, Enter играет
@@ -16,12 +21,12 @@
   // сейчас реально звучит, — разные вещи, поэтому и подсветки разные
   // (синий = выбор, янтарь = в эфире).
   //
-  // Ни одна модалка этого компонента (удаление/очистка плейлиста, правка
-  // трека) наружу отдельным bindable больше НЕ пробрасывается: с появлением
-  // модалки выбора устройства (AudioDeviceSelect) держать в Audio.svelte
-  // отдельный bool на каждую стало хрупко — реальный источник истины
-  // "открыта ли хоть одна модалка" — DOM (`.modal.modal-open`), его и
-  // проверяет document-level обработчик клавиш вкладки напрямую.
+  // Ни одна модалка вкладки (очистка плейлиста, правка трека, удаление
+  // плейлиста в PlaylistSidebar, выбор устройства в AudioDeviceSelect)
+  // наружу отдельным bindable НЕ пробрасывается: держать в Audio.svelte
+  // отдельный bool на каждую из четырёх стало хрупко — реальный источник
+  // истины "открыта ли хоть одна модалка" — DOM (`.modal.modal-open`), его
+  // и проверяет document-level обработчик клавиш вкладки напрямую.
   let {
     selectedItemId = $bindable(null),
   }: { selectedItemId?: number | null } = $props();
@@ -30,8 +35,6 @@
   const tracks = $derived(audioStore.tracks);
   const player = $derived(audioStore.player.state);
 
-  let newPlaylistName = $state("");
-  let playlistToDelete = $state<Playlist | null>(null);
   // playlistToClear — «Удалить всё» (правка 1): очищает список плейлиста и,
   // как одиночное «Убрать из плейлиста», удаляет с диска треки, которые
   // перестали использоваться в любом плейлисте — предупреждение об этом
@@ -42,35 +45,6 @@
   // editingTrack — правка трека (название/trim/gain) теперь открывается
   // прямо со строки плейлиста: отдельного экрана медиатеки больше нет.
   let editingTrack = $state<AudioTrack | null>(null);
-  let renamingId = $state<number | null>(null);
-  let renameValue = $state("");
-
-  const createPlaylist = async () => {
-    const name = newPlaylistName.trim();
-    if (!name) return;
-    newPlaylistName = "";
-    await audioStore.createPlaylist(name);
-  };
-
-  const startRename = (p: Playlist) => {
-    renamingId = p.ID;
-    renameValue = p.name;
-  };
-
-  const commitRename = async () => {
-    if (renamingId === null) return;
-    const id = renamingId;
-    const name = renameValue.trim();
-    renamingId = null;
-    if (name) await audioStore.renamePlaylist(id, name);
-  };
-
-  const confirmDeletePlaylist = async () => {
-    if (!playlistToDelete) return;
-    const id = playlistToDelete.ID;
-    playlistToDelete = null;
-    await audioStore.removePlaylist(id);
-  };
 
   const confirmClearPlaylist = async () => {
     if (!playlistToClear) return;
@@ -156,13 +130,6 @@
     audioStore.removeFromPlaylist(id);
   }
 
-  // playlistIsOnAir — играет (или на паузе) элемент ИМЕННО этого плейлиста —
-  // для текста модалок удаления/очистки плейлиста (ниже): оператор должен
-  // видеть, что удаление затронет то, что сейчас звучит в зале.
-  function playlistIsOnAir(p: Playlist): boolean {
-    return !!player && player.status !== "idle" && player.playlistId === p.ID;
-  }
-
   // moveSelectedItem — перестановка ОДНИМ комплектом кнопок справа от
   // списка (правка 2, второй раунд), по образцу CoupletsList.svelte:75-115:
   // там одна колонка кнопок сбоку двигает активный куплет, а не свой набор
@@ -184,8 +151,9 @@
   // Верхняя граница поля «Фейд» — правка 6: подобрана на глаз, длиннее
   // разумного перехода между треками не бывает. Нижняя граница держится на
   // нуле (не выше) намеренно: 0 — осмысленное значение, полностью
-  // отключающее фейд (audio_service.go:449, FadeMs<=0 сводится к обычному
-  // Stop() без effects.Transition — при нулевой длине она бы дала NaN).
+  // отключающее фейд (FadeOutStop в audio_service.go: FadeMs<=0 сводится к
+  // обычному Stop() без effects.Transition — при нулевой длине она бы дала
+  // NaN).
   const MAX_FADE_MS = 10_000;
 
   function setFadeMs(playlist: Playlist, ms: number) {
@@ -195,95 +163,7 @@
 </script>
 
 <div class="flex h-full flex-row gap-2">
-  <div class="flex w-1/3 flex-col gap-2 lg:w-1/4">
-    <div class="flex gap-1">
-      <input
-        type="text"
-        class="input input-bordered input-sm w-full"
-        placeholder="Новый плейлист"
-        bind:value={newPlaylistName}
-        onkeydown={(e) => e.key === "Enter" && createPlaylist()}
-      />
-      <button
-        class="btn btn-neutral btn-sm"
-        disabled={!newPlaylistName.trim()}
-        onclick={createPlaylist}
-      >
-        <MuiIcon name="add" style="font-size: 1.1rem" />
-      </button>
-    </div>
-
-    <!-- Рамка списка (правка 5, третий раунд) — тот же визуальный язык, что
-    у List.svelte:85-86 (вкладка «Песни»): border-base-300 + rounded-lg. Сам
-    компонент List сюда не переиспользуем — у него своя виртуализация и
-    модель данных, нужен только внешний вид. -->
-    <div class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-base-300">
-      {#if playlists.loading}
-        <div class="p-4 text-center opacity-60">Загрузка…</div>
-      {:else if playlists.list.length === 0}
-        <div class="p-4 text-center text-sm opacity-60">
-          Пока нет плейлистов — создайте его выше, файлы импортируются сразу
-          в него
-        </div>
-      {:else}
-        <ul class="flex flex-col gap-1">
-          {#each playlists.list as p (p.ID)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-            <li
-              class={[
-                "group/item flex items-center gap-1 rounded border-2 p-2",
-                p.ID === playlists.active?.ID
-                  ? "border-primary bg-primary/10"
-                  : "cursor-pointer border-transparent hover:bg-base-200",
-              ]}
-              onclick={() => (playlists.active = p)}
-            >
-              {#if renamingId === p.ID}
-                <input
-                  type="text"
-                  class="input input-bordered input-xs flex-1"
-                  bind:value={renameValue}
-                  onclick={(e) => e.stopPropagation()}
-                  onkeydown={(e) => e.key === "Enter" && commitRename()}
-                  onblur={commitRename}
-                />
-              {:else}
-                <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                  >{p.name}</span
-                >
-                {#if p.autoAdvance}
-                  <MuiIcon
-                    name="repeat"
-                    style="font-size: 0.9rem"
-                    classes="opacity-60"
-                  />
-                {/if}
-                <button
-                  class="btn btn-ghost btn-xs hidden px-1 group-hover/item:block"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    startRename(p);
-                  }}
-                  title="Переименовать"
-                  ><MuiIcon name="edit" style="font-size: 0.9rem" /></button
-                >
-                <button
-                  class="btn btn-ghost btn-xs hidden px-1 text-error group-hover/item:block"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    playlistToDelete = p;
-                  }}
-                  title="Удалить плейлист"
-                  ><MuiIcon name="delete" style="font-size: 0.9rem" /></button
-                >
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-  </div>
+  <PlaylistSidebar />
 
   <div class="flex min-w-0 flex-1 flex-col gap-2">
     {#if !playlists.active}
@@ -551,23 +431,6 @@
 
 <EditTrackModal bind:track={editingTrack} />
 
-{#if playlistToDelete}
-  <ConfirmDeleteModal
-    title="Удалить плейлист?"
-    onConfirm={confirmDeletePlaylist}
-    onCancel={() => (playlistToDelete = null)}
-  >
-    <span class="font-semibold">«{playlistToDelete.name}»</span> будет удалён
-    безвозвратно. Фонограммы, которые не используются ни в одном другом
-    плейлисте, будут удалены вместе с файлами.
-    {#if playlistIsOnAir(playlistToDelete)}
-      <br /><span class="font-semibold text-error"
-        >Этот плейлист сейчас в эфире — воспроизведение остановится.</span
-      >
-    {/if}
-  </ConfirmDeleteModal>
-{/if}
-
 {#if playlistToClear}
   <ConfirmDeleteModal
     title="Удалить все элементы плейлиста?"
@@ -577,7 +440,7 @@
     Список плейлиста <span class="font-semibold">«{playlistToClear.name}»</span>
     будет очищен. Фонограммы, которые не используются ни в одном другом
     плейлисте, будут удалены вместе с файлами с диска.
-    {#if playlistIsOnAir(playlistToClear)}
+    {#if audioStore.isPlaylistOnAir(playlistToClear.ID)}
       <br /><span class="font-semibold text-error"
         >Этот плейлист сейчас в эфире — воспроизведение остановится.</span
       >

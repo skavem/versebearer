@@ -119,6 +119,40 @@ func TestSetDeviceStopsPlayback(t *testing.T) {
 	}
 }
 
+// TestSetDeviceSameIdDoesNotInterruptPlayback — HIGH №3 обзора: модалка
+// выбора устройства подсвечивает карточку текущего выбора, но она же и
+// кнопка — клик по НЕЙ ЖЕ (посмотреть частоту, не поменять устройство) не
+// должен обрывать звук.
+func TestSetDeviceSameIdDoesNotInterruptPlayback(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	src := filepath.Join(t.TempDir(), "samedevice.wav")
+	writeTestWav(t, src, uniqueTestDuration())
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+	playlist := a.CreatePlaylist("Тест")
+	p := a.AddToPlaylist(float32(playlist.ID), float32(res.Track.ID))
+
+	if err := a.Play(float32(playlist.ID), float32(p.Items[0].ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Fatalf("expected playing, got %q", st.Status)
+	}
+
+	if err := a.SetDevice(a.GetDeviceId()); err != nil {
+		t.Fatalf("SetDevice (same id): %v", err)
+	}
+
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Errorf("SetDevice with the already-selected id must not interrupt playback, status = %q", st.Status)
+	}
+}
+
 // TestDeviceLostMarksStateAndStops — план: пропажа устройства (StopProc при
 // expectStop==false) переводит в idle и выставляет DeviceLost, без тихой
 // подмены на другое устройство.

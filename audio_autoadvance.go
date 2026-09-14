@@ -202,53 +202,118 @@ func (a *AudioService) refreshPendingForPlaylist(playlistId uint) {
 // pending/NextTitle именно в контексте автоперехода, а не как отдельную
 // функцию предпросмотра очереди.
 func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
+	if a.pl == nil {
+		// a.pl может быть nil в тестах, конструирующих AudioService{} без
+		// NewAudioService (см. releaseTrackFile в audio_library.go) — нет
+		// плеера, нечему готовить "следующий" и некому показывать
+		// nextTitle. Сегодня
+		// недостижимо на реальных путях вызова (Play/tryAdvance гарантируют
+		// a.pl), но держим ту же конвенцию, что dropPending и
+		// refreshPendingForPlaylist (LOW обзора).
+		return
+	}
+
+	playlist, next, ok := a.resolveNextItem(playlistId, afterItemId)
+	if !ok {
+		a.dropPending()
+		return
+	}
+
+	a.installPendingNext(playlistId, afterItemId, playlist, next)
+}
+
+// resolveNextItem — общее начало обоих путей подготовки по «честному»
+// afterItemId (preparePendingNext выше и buildPendingSync ниже): выключенный
+// AutoAdvance, нечитаемый плейлист и конец списка одинаково означают
+// «готовить нечего». А вот ЧТО делать с этим ответом, у двух путей разное
+// (дропнуть уже открытый pending против «просто вернуть nil»), поэтому
+// решение остаётся у них, а не здесь.
+func (a *AudioService) resolveNextItem(playlistId, afterItemId uint) (models.Playlist, models.PlaylistItem, bool) {
+	var playlist models.Playlist
+	if err := inits.DB.First(&playlist, playlistId).Error; err != nil || !playlist.AutoAdvance {
+		return playlist, models.PlaylistItem{}, false
+	}
+	next, ok := a.nextPlaylistItem(playlistId, afterItemId, playlist.Loop)
+	return playlist, next, ok
+}
+
+// refreshPendingAfterRemoval — как refreshPending, но для случая, когда сам
+// afterItemId (currently-playing элемент) только что удалён из плейлиста
+// (RemoveFromPlaylist). nextPlaylistItem(playlistId, removedItemId, ...)
+// в этом случае не находит removedItemId в уже актуальном списке (idx=-1,
+// см. itemIndex) и молча сдаётся — ТОТ ЖЕ дефект, что решал refreshPending,
+// просто с другого входа (HIGH №1 обзора): оператор убирает играющую
+// строку, трек доигрывает, а дальше по списку есть на что переходить, но
+// автопереход считает, что "следующего нет".
+//
+// removedPosition — Position удалённого элемента ДО удаления. После
+// перенумерации 1..n (см. транзакцию в RemoveFromPlaylist) на этом же месте
+// стоит ровно тот элемент, что унаследовал место удалённого — то есть
+// честный "следующий". Если удалённый был последним — либо оборачиваемся
+// на первый (Loop), либо продолжать нечем, как и в nextPlaylistItem.
+func (a *AudioService) refreshPendingAfterRemoval(playlistId, removedItemId uint, removedPosition int) {
 	var playlist models.Playlist
 	if err := inits.DB.First(&playlist, playlistId).Error; err != nil || !playlist.AutoAdvance {
 		a.dropPending()
 		return
 	}
 
-	next, ok := a.nextPlaylistItem(playlistId, afterItemId, playlist.Loop)
-	if !ok {
+	var items []models.PlaylistItem
+	if err := inits.DB.Preload("Track").Where("playlist_id = ?", playlistId).Order("position ASC").Find(&items).Error; err != nil {
 		a.dropPending()
 		return
 	}
+
+	switch {
+	case removedPosition >= 1 && removedPosition-1 < len(items):
+		// На освободившемся месте стоит наследник удалённого — он и есть
+		// честный "следующий".
+		a.installPendingNext(playlistId, removedItemId, playlist, items[removedPosition-1])
+	case playlist.Loop && len(items) > 0:
+		// Удалён последний элемент — оборачиваемся на первый, как и
+		// nextPlaylistItem.
+		a.installPendingNext(playlistId, removedItemId, playlist, items[0])
+	default:
+		a.dropPending()
+	}
+}
+
+// installPendingNext — общий хвост preparePendingNext и
+// refreshPendingAfterRemoval ПОСЛЕ того, как "следующий" элемент уже
+// вычислен (тем или иным способом): дедупликация уже открытого декодера,
+// синхронная публикация в a.pending и запуск decodePendingNext в фоне (см.
+// комментарии у preparePendingNext про обе эти ловушки — они относятся
+// сюда же, а не только к честному пути по afterItemId).
+func (a *AudioService) installPendingNext(playlistId, afterItemId uint, playlist models.Playlist, next models.PlaylistItem) {
+	// Заголовок «далее: …» пересчитывается в любом исходе — и когда декодер
+	// переоткрывается, и когда дедупликация ниже оставляет уже открытый как
+	// есть: он дёшев и идемпотентен, в отличие от decodeExt.
+	a.pl.setNextTitle(next.Track.Title)
 
 	a.pendingMu.Lock()
 	current := a.pending
 	a.pendingMu.Unlock()
 	if current != nil && current.forItemId == afterItemId && current.itemId == next.ID {
-		// Ответ не изменился — уже открытый декодер остаётся как есть,
-		// только заголовок пересчитан (дёшево, идемпотентно).
-		a.pl.setNextTitle(next.Track.Title)
-		return
+		return // ответ не изменился — уже открытый декодер остаётся как есть
 	}
 
-	a.pl.setNextTitle(next.Track.Title)
+	pn := a.newPendingNext(playlistId, afterItemId, playlist, next)
 
-	// Фейд считаем для ЭТОГО подготавливаемого трека (next) — на момент,
-	// когда играть будет уже он.
-	fadeMs := a.fadeMsBefore(playlist, next.ID)
-
-	pn := &pendingNext{
-		forItemId:  afterItemId,
-		itemId:     next.ID,
-		trackId:    next.TrackId,
-		playlistId: playlistId,
-		ready:      make(chan struct{}),
-		gainDb:     next.Track.GainDb,
-		durationMs: trimmedDurationMs(next.Track), // этап 5: UI считает от TrimStartMs
-		fadeMs:     fadeMs,
-	}
-
-	// Более старый pending (если preparePendingNext вызвали дважды для
-	// одного и того же afterItemId с другим ответом, либо для другого
-	// играющего трека) — сторонний объект, который уже никому не нужен:
-	// отменяем и закрываем его независимо от нашей собственной подготовки.
-	// takePending делает снятие старого и публикацию pn нераздельными для
-	// внешнего наблюдателя (см. выше).
-	old := a.takePending()
+	// Более старый pending (если preparePendingNext/refreshPendingAfterRemoval
+	// вызвали дважды для одного и того же afterItemId с другим ответом, либо
+	// для другого играющего трека) — сторонний объект, который уже никому
+	// не нужен: отменяем и закрываем его независимо от нашей собственной
+	// подготовки.
+	//
+	// ⚠️ Снятие старого и публикация pn — ОДНА критическая секция под
+	// pendingMu (а не takePending() + отдельный Lock/Unlock ниже): раньше
+	// между ними было окно планировщика, в которое конкурентный dropPending
+	// увидел бы a.pending == nil и ничего не отменил, а следом этот код всё
+	// равно опубликовал бы pn — декодер пережившего стоп хендла повис бы до
+	// следующего Play (LOW обзора). Звуку это не вредило (gen всё равно
+	// отбросит устаревшую цепочку), но это утечка файлового хендла.
 	a.pendingMu.Lock()
+	old := a.pending
 	a.pending = pn
 	a.pendingMu.Unlock()
 	if old != nil {
@@ -257,6 +322,26 @@ func (a *AudioService) preparePendingNext(playlistId, afterItemId uint) {
 	}
 
 	go a.decodePendingNext(pn, next)
+}
+
+// newPendingNext — заполненный, но ещё НЕ декодированный pendingNext для
+// элемента next, который пойдёт после afterItemId. Общий для обоих путей
+// появления pending (installPendingNext выше и buildPendingSync ниже):
+// расходиться в наборе полей им нельзя — tryAdvance собирает из них trackMeta
+// одинаково, чьей бы дорогой pending ни появился.
+func (a *AudioService) newPendingNext(playlistId, afterItemId uint, playlist models.Playlist, next models.PlaylistItem) *pendingNext {
+	return &pendingNext{
+		forItemId:  afterItemId,
+		itemId:     next.ID,
+		trackId:    next.TrackId,
+		playlistId: playlistId,
+		ready:      make(chan struct{}),
+		gainDb:     next.Track.GainDb,
+		durationMs: trimmedDurationMs(next.Track), // этап 5: UI считает от TrimStartMs
+		// Фейд считаем для ЭТОГО подготавливаемого трека (next) — на момент,
+		// когда играть будет уже он.
+		fadeMs: a.fadeMsBefore(playlist, next.ID),
+	}
 }
 
 // fadeMsBefore — FadeMs плейлиста для трека, который сейчас доигрывает
@@ -352,26 +437,28 @@ func (a *AudioService) fillPendingNext(pn *pendingNext, track models.AudioTrack)
 // которой пропущенная где-то инвалидация pending — баг производительности, а
 // не баг функциональности (см. предупреждение у pendingNext).
 func (a *AudioService) buildPendingSync(playlistId, afterItemId uint) *pendingNext {
-	var playlist models.Playlist
-	if err := inits.DB.First(&playlist, playlistId).Error; err != nil || !playlist.AutoAdvance {
-		return nil
-	}
-	next, ok := a.nextPlaylistItem(playlistId, afterItemId, playlist.Loop)
-	if !ok {
+	if a.pl == nil {
+		// см. комментарий в preparePendingNext — та же конвенция (LOW обзора).
 		return nil
 	}
 
-	fadeMs := a.fadeMsBefore(playlist, next.ID)
-	pn := &pendingNext{
-		forItemId:  afterItemId,
-		itemId:     next.ID,
-		trackId:    next.TrackId,
-		playlistId: playlistId,
-		ready:      make(chan struct{}),
-		gainDb:     next.Track.GainDb,
-		durationMs: trimmedDurationMs(next.Track),
-		fadeMs:     fadeMs,
+	playlist, next, ok := a.resolveNextItem(playlistId, afterItemId)
+	if !ok {
+		return nil
 	}
+	pn := a.newPendingNext(playlistId, afterItemId, playlist, next)
+
+	// Публикуем СРАЗУ, ДО decodeExt — иначе открытый декодер невидим для
+	// dropPendingForTrack (MEDIUM №6 обзора): в окне синхронного фолбэка
+	// оператор может нажать × ровно на этом треке, тот оказывается
+	// последней ссылкой, os.Remove падает с sharing violation на Windows —
+	// ошибка уходит только в лог, строка всё равно удаляется, а файл
+	// остаётся сиротой молча и навсегда. tryAdvance сам снимает pn отсюда,
+	// как только decodePendingNext ниже завершится (см. там).
+	a.pendingMu.Lock()
+	a.pending = pn
+	a.pendingMu.Unlock()
+
 	a.decodePendingNext(pn, next) // синхронно — decodePendingNext сам закрывает ready
 	return pn
 }
@@ -405,6 +492,21 @@ func (a *AudioService) tryAdvance(finished trackMeta, gen uint64) bool {
 	}
 
 	<-pn.ready
+
+	// buildPendingSync (в отличие от честного пути через preparePendingNext)
+	// публикует pn в a.pending только для того, чтобы decodeExt был виден
+	// dropPendingForTrack, пока идёт синхронный фолбэк (MEDIUM №6 обзора) —
+	// теперь, когда подготовка завершена (ready уже закрыт выше), снимаем
+	// его сами, если его не забрал/не отменил кто-то конкурентный
+	// (dropPendingForTrack/новый Play/Stop) за это время. Для честного пути
+	// (пришли сюда с a.pending уже обнулённым выше) это безопасный no-op:
+	// a.pending к этому моменту либо nil, либо принадлежит уже другому pn.
+	a.pendingMu.Lock()
+	if a.pending == pn {
+		a.pending = nil
+	}
+	a.pendingMu.Unlock()
+
 	if pn.err != nil {
 		a.emit("audio_error", fmt.Sprintf("не удалось открыть следующий трек: %s", pn.err.Error()))
 		pn.closeSrc()

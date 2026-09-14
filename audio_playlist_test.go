@@ -417,6 +417,108 @@ func TestRemovePlayingItemKeepsPlayingWhenTrackSharedElsewhere(t *testing.T) {
 	}
 }
 
+// TestRemovePlayingItemAdvancesWhenTrackSharedElsewhere — HIGH №1 обзора:
+// удаление ИГРАЮЩЕГО элемента, чей трек ещё используется в другом плейлисте
+// (значит физической причины для стопа нет — см.
+// TestRemovePlayingItemKeepsPlayingWhenTrackSharedElsewhere), в плейлисте с
+// AutoAdvance обрывало автопереход тишиной: afterItemId/finished.itemId
+// удалённого элемента больше не находится в актуальном списке (idx=-1,
+// nextPlaylistItem), и ни честный refreshPending (RemoveFromPlaylist), ни
+// синхронный buildPendingSync-предохранитель (tryAdvance) этого не
+// переживали — тот же дефект, ради которого писался весь рефакторинг
+// pending, просто с другого входа. Обязан падать (таймаутом driveUntil) на
+// коде до правки: играющий трек доигрывает и останавливается вместо
+// перехода на itemIds[2].
+func TestRemovePlayingItemAdvancesWhenTrackSharedElsewhere(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	other := a.CreatePlaylist("Фон")
+
+	playlist := models.Playlist{Name: "Основной", AutoAdvance: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	var itemIds, trackIds []uint
+	for i := 0; i < 3; i++ {
+		tid := createTestTrack(t, "shared-advance")
+		trackIds = append(trackIds, tid)
+		item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: tid, Position: i + 1}
+		if err := inits.DB.Create(&item).Error; err != nil {
+			t.Fatalf("create item: %v", err)
+		}
+		itemIds = append(itemIds, item.ID)
+	}
+	// Трек второго элемента (Position=2) — тот, что будет играть и будет
+	// удалён — дублируем в другой плейлист, чтобы deleteTrackIfUnused не
+	// нашёл его неиспользуемым и не остановил воспроизведение сам (тогда
+	// тест проверял бы TestRemovePlayingItemStopsPlayback, а не автопереход).
+	a.AddToPlaylist(float32(other.ID), float32(trackIds[1]))
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[1])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Fatalf("expected playing, got %q", st.Status)
+	}
+
+	a.RemoveFromPlaylist(float32(itemIds[1]))
+
+	// Играющий (уже удалённый из БД) элемент доигрывает, затем обязан
+	// перейти на itemIds[2], а не остановиться молча тишиной.
+	driveUntil(t, a, func(st PlayerState) bool { return st.ItemId == itemIds[2] })
+}
+
+// TestRemovePlaylistDeletesUnusedTracks — HIGH №2 обзора: RemovePlaylist
+// удалял только строки PlaylistItem и сам плейлист, но никогда не звал
+// deleteTrackIfUnused — самый естественный жест уборки (экрана медиатеки
+// нет, оператор удаляет плейлист целиком после служения) копил файлы в
+// медиатеке недостижимыми из UI навсегда. По сути RemovePlaylist теперь =
+// ClearPlaylist + удаление строки плейлиста: то же правило дедупликации по
+// ссылкам, что и TestClearPlaylistDeletesUnusedTracks.
+func TestRemovePlaylistDeletesUnusedTracks(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	solo := a.CreatePlaylist("Соло")
+	shared := a.CreatePlaylist("Общий")
+
+	soloTrackId := createTestTrack(t, "solo-removeplaylist")
+	sharedTrackId := createTestTrack(t, "shared-removeplaylist")
+
+	a.AddToPlaylist(float32(solo.ID), float32(soloTrackId))
+	a.AddToPlaylist(float32(solo.ID), float32(sharedTrackId))
+	a.AddToPlaylist(float32(shared.ID), float32(sharedTrackId))
+
+	a.RemovePlaylist(float32(solo.ID))
+
+	if err := inits.DB.First(&models.AudioTrack{}, soloTrackId).Error; err == nil {
+		t.Error("solo track should be deleted, it had no other references after RemovePlaylist")
+	}
+	if err := inits.DB.First(&models.AudioTrack{}, sharedTrackId).Error; err != nil {
+		t.Error("shared track should survive, still referenced by the other playlist")
+	}
+}
+
+// TestRemovePlaylistRefusesLastOne — LOW обзора: как RemoveTranslation для
+// переводов (db_import.go) — RemovePlaylist не даёт остаться совсем без
+// плейлиста: миграция версии 8 сеет ровно один
+// (backend/inits/db.go/seedDefaultPlaylist), и без него импортировать
+// станет некуда, а повторный запуск seedDefaultPlaylist уже не сработает
+// (версия БД уже "8").
+func TestRemovePlaylistRefusesLastOne(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	only := a.CreatePlaylist("Единственный")
+
+	result := a.RemovePlaylist(float32(only.ID))
+	if len(result) != 1 || result[0].ID != only.ID {
+		t.Fatalf("last playlist must survive RemovePlaylist, got %+v", result)
+	}
+}
+
 // TestNextPrevNavigation проверяет ручную навигацию (Next/Prev) — она
 // работает независимо от AutoAdvance (это действие оператора, не автоматика)
 // и оборачивается по Loop так же, как автопереход.

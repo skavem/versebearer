@@ -1,6 +1,7 @@
 package inits
 
 import (
+	"log"
 	"strconv"
 
 	"changeme/backend/models"
@@ -147,7 +148,13 @@ func seedDefaultPlaylist(db *gorm.DB) {
 	if err := db.Model(&models.Playlist{}).Count(&count).Error; err != nil || count > 0 {
 		return
 	}
-	db.Create(&models.Playlist{Name: "Плейлист"})
+	if err := db.Create(&models.Playlist{Name: "Плейлист"}).Error; err != nil {
+		// LOW обзора: версия всё равно поднимется до "8" сразу после
+		// вызова (см. вызывающего в init()) — повтора не будет, поэтому
+		// молчание здесь означало бы оставить приложение вообще без
+		// плейлиста навсегда, без единого следа в логе почему.
+		log.Println("seedDefaultPlaylist: error creating default playlist", err)
+	}
 }
 
 // defaultTheme is the hardcoded style used to seed the default theme on a fresh

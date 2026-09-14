@@ -195,6 +195,19 @@ const createAudioStore = () => {
     },
   };
 
+  // runCommand — общая обёртка команд транспорта, у которых нет результата,
+  // только факт отказа: ошибка бэка попадает в общий алерт вкладки
+  // (lastError), а не в unhandled rejection. Одна обёртка вместо копии
+  // try/catch в каждой команде — иначе первая же правка (скажем, префикс в
+  // тексте ошибки) применилась бы к части из них.
+  async function runCommand(call: () => Promise<unknown>): Promise<void> {
+    try {
+      await call();
+    } catch (e) {
+      lastError = errorMessage(e);
+    }
+  }
+
   async function refreshPlayerState() {
     try {
       playerState = await State();
@@ -271,6 +284,16 @@ const createAudioStore = () => {
      * .omc/plans/audio-playlist-implementation.md, п. 1.5).
      */
     async importFiles(paths: string[]): Promise<ImportTrackResult[]> {
+      if (importing) {
+        // MEDIUM №4 обзора: повторный вход (вторая пачка брошена, пока
+        // первая ещё не завершилась) — раньше обе конкурентные цепочки
+        // насчитывали пересекающиеся Position (см. AddTracksToPlaylist), а
+        // первая, завершившись, снимала importing по finally и «Отмена»
+        // переставала действовать на вторую. Проще и безопаснее отказать
+        // второй пачке целиком, чем пытаться их тихо сериализовать.
+        lastError = "импорт уже идёт — дождитесь его окончания";
+        return [];
+      }
       importing = true;
       importCancelRequested = false;
       importProgress = { done: 0, total: paths.length };
@@ -413,7 +436,17 @@ const createAudioStore = () => {
     playlists,
     async refreshPlaylists() {
       try {
-        playlists.list = (await ListPlaylists()) ?? [];
+        const list = (await ListPlaylists()) ?? [];
+        playlists.list = list;
+        // LOW обзора: миграция версии 8 сеет один плейлист по умолчанию
+        // именно затем, чтобы импорту было куда идти (seedDefaultPlaylist,
+        // backend/inits/db.go) — без автовыбора первого замысел доставлен
+        // наполовину: activePlaylistId остаётся null после старта, кнопка
+        // импорта недоступна, а бросок файлов отвечает "выберите плейлист",
+        // хотя плейлист уже есть.
+        if (activePlaylistId === null && list.length > 0) {
+          playlists.active = list[0];
+        }
       } catch (e) {
         lastError = errorMessage(e);
         playlists.list = [];
@@ -428,8 +461,15 @@ const createAudioStore = () => {
       await RenamePlaylist(id, name);
     },
     async removePlaylist(id: number) {
-      if (playlists.active?.ID === id) playlists.active = null;
-      await RemovePlaylist(id);
+      // Активный плейлист снимается только ПОСЛЕ ответа бэка и только если
+      // он реально пропал из списка — RemovePlaylist теперь может отказать
+      // (последний плейлист, LOW обзора) и вернуть список без изменений;
+      // раньше active обнулялся заранее и безусловно, и отказ бэка оставлял
+      // оператора с несуществующим "выбором" при живом плейлисте.
+      const list = await RemovePlaylist(id);
+      if (playlists.active?.ID === id && !(list ?? []).some((p) => p.ID === id)) {
+        playlists.active = null;
+      }
     },
     // clearPlaylist — «Удалить всё» (правка 1): очищает список ПЛЮС удаляет
     // из медиатеки+с диска треки, которые перестали использоваться хоть
@@ -456,6 +496,18 @@ const createAudioStore = () => {
     },
 
     player,
+    // isPlaylistOnAir — играет (или на паузе) элемент ИМЕННО этого плейлиста.
+    // В сторе, а не в компонентах: спрашивают оба куска вкладки (сайдбар — в
+    // тексте модалки удаления плейлиста, панель — в тексте «Удалить всё»), и
+    // разъезжаться этим двум ответам нельзя — оператор по ним решает, оборвёт
+    // ли его действие эфир.
+    isPlaylistOnAir(playlistId: number): boolean {
+      return (
+        !!playerState &&
+        playerState.status !== "idle" &&
+        playerState.playlistId === playlistId
+      );
+    },
     refreshPlayerState,
     // startPolling/stopPolling — вызываются из $effect Audio.svelte (запуск
     // при монтировании вкладки, остановка при уходе с неё): опрос State()
@@ -482,18 +534,10 @@ const createAudioStore = () => {
       }
     },
     async stop() {
-      try {
-        await Stop();
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(Stop);
     },
     async toggle() {
-      try {
-        await Toggle();
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(Toggle);
     },
     // playOrToggleSelected — единая логика кнопки play/pause мини-плеера И
     // клавиши Space на вкладке (правка 4, второй раунд): играет — пауза; на
@@ -516,28 +560,16 @@ const createAudioStore = () => {
       await this.play(playlist.ID, item.ID);
     },
     async next() {
-      try {
-        await Next();
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(Next);
     },
     async prev() {
-      try {
-        await Prev();
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(Prev);
     },
     // fadeOutStop — «Стоп» мини-плеера (этап 6): единственная кнопка стопа,
     // т.к. при инварианте «ровно один активный трек» (И5) «стоп всё»
     // совпадает со «стоп с фейдом».
     async fadeOutStop() {
-      try {
-        await FadeOutStop();
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(FadeOutStop);
     },
     // seek обновляет playerState.positionMs оптимистично, не дожидаясь
     // следующего опроса (до 500 мс, см. startPolling) — по образцу setVolume
@@ -548,11 +580,7 @@ const createAudioStore = () => {
     // раз на 5 секунд.
     async seek(ms: number) {
       if (playerState) playerState = { ...playerState, positionMs: ms };
-      try {
-        await Seek(ms);
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(() => Seek(ms));
     },
     // setVolume обновляет playerState.volume оптимистично, не дожидаясь
     // следующего опроса (до 500 мс, см. startPolling): без этого слайдер
@@ -560,11 +588,7 @@ const createAudioStore = () => {
     // значению, пока опрос не подтвердит новое.
     async setVolume(v: number) {
       if (playerState) playerState = { ...playerState, volume: v };
-      try {
-        await SetVolume(v);
-      } catch (e) {
-        lastError = errorMessage(e);
-      }
+      await runCommand(() => SetVolume(v));
     },
   };
 
