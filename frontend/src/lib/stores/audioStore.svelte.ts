@@ -4,6 +4,8 @@ import type {
 } from "$lib/bindings/changeme/backend/models";
 import {
   AddToPlaylist,
+  AddTracksToPlaylist,
+  ClearPlaylist,
   CreatePlaylist,
   FadeOutStop,
   GetDeviceId,
@@ -42,6 +44,42 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// audioExtensions — зеркало backend audioFilePattern (audio_import.go):
+// четыре нативных формата beep плюс те, что при импорте конвертируются в
+// FLAC через ffmpeg. Используется ТОЛЬКО для перетаскивания файлов из
+// системы (правка 2) — фильтр по расширению отсеивает явно не то ДО
+// хеширования/копирования, а не вместо серверной проверки: ImportTrack
+// всё равно откажет с понятной ошибкой на файле с "правильным"
+// расширением, но чужим содержимым (см. audio_import.go).
+const audioExtensions = new Set([
+  ".mp3",
+  ".wav",
+  ".flac",
+  ".ogg",
+  ".oga",
+  ".m4a",
+  ".aac",
+  ".wma",
+  ".opus",
+  ".aiff",
+  ".aif",
+  ".alac",
+  ".wv",
+]);
+
+// fileExtension — путь может прийти с обратными слэшами (Windows) даже в
+// строке, полученной от Go, поэтому режем по обоим разделителям, а не
+// полагаемся на браузерный path.
+function fileExtension(path: string): string {
+  const name = path.split(/[/\\]/).pop() ?? path;
+  const idx = name.lastIndexOf(".");
+  return idx > 0 ? name.slice(idx).toLowerCase() : "";
+}
+
+function hasAudioExtension(path: string): boolean {
+  return audioExtensions.has(fileExtension(path));
+}
+
 // ⚠️ Отступление от образца (songsStore.svelte.ts): при module-init тянем
 // только треки. Устройства (ListDevices) и плейлисты (ListPlaylists)
 // сознательно НЕ тянутся здесь: ListDevices запустил бы malgo.InitContext
@@ -52,7 +90,6 @@ function errorMessage(e: unknown): string {
 const createAudioStore = () => {
   let tracksList = $state<AudioTrack[]>([]);
   let tracksLoading = $state(true);
-  let activeTrack = $state<AudioTrack | null>(null);
 
   let importing = $state(false);
   let importProgress = $state<{ done: number; total: number } | null>(null);
@@ -64,7 +101,17 @@ const createAudioStore = () => {
 
   let playlistsList = $state<Playlist[]>([]);
   let playlistsLoading = $state(true);
-  let activePlaylist = $state<Playlist | null>(null);
+  // activePlaylistId — источник истины "какой плейлист активен" держим как
+  // ПРИМИТИВ, не как объект: playlists.list пересоздаёт весь массив (и все
+  // объекты в нём) новыми ссылками на каждый audio_playlists_update, даже
+  // если содержимое не изменилось. Раньше зеркальный activePlaylist
+  // ($state<Playlist|null>) переприсваивался на КАЖДУЮ такую мутацию — и
+  // любой $effect/$derived, читавший playlists.active, срабатывал заново
+  // просто от смены ссылки, а не значения (баг: перестановка сбрасывала
+  // клавиатурный выбор в Audio.svelte). playlists.active ниже — чистый
+  // геттер поверх этого id + актуального списка, безопасный к пересозданию
+  // массива.
+  let activePlaylistId = $state<number | null>(null);
 
   // playerState — снимок PlayerState, опрашиваемый по таймеру, пока вкладка
   // «Звук» открыта (startPolling/stopPolling, из $effect Audio.svelte — план,
@@ -100,17 +147,8 @@ const createAudioStore = () => {
       return tracksList;
     },
     set list(v: AudioTrack[]) {
-      const prevActive = activeTrack;
       tracksList = v;
-      activeTrack =
-        (prevActive && tracksList.find((t) => t.ID === prevActive.ID)) ?? null;
       tracksLoading = false;
-    },
-    get active() {
-      return activeTrack;
-    },
-    set active(v: AudioTrack | null) {
-      activeTrack = v;
     },
   };
 
@@ -134,18 +172,20 @@ const createAudioStore = () => {
       return playlistsList;
     },
     set list(v: Playlist[]) {
-      const prevActive = activePlaylist;
       playlistsList = v;
-      activePlaylist =
-        (prevActive && playlistsList.find((p) => p.ID === prevActive.ID)) ??
-        null;
       playlistsLoading = false;
     },
+    // active — вычисляется каждый раз из activePlaylistId + актуального
+    // списка, а не хранится отдельным $state-зеркалом (см. комментарий у
+    // activePlaylistId выше). Если ID пропал из списка (плейлист удалили
+    // где-то ещё) — активного просто нет, без отдельной синхронизации.
     get active() {
-      return activePlaylist;
+      return (
+        playlistsList.find((p) => p.ID === activePlaylistId) ?? null
+      );
     },
     set active(v: Playlist | null) {
-      activePlaylist = v;
+      activePlaylistId = v?.ID ?? null;
     },
   };
 
@@ -193,8 +233,17 @@ const createAudioStore = () => {
     lastError = "устройство вывода пропало";
     refreshPlayerState();
   });
+  // audio_files_dropped — правка 2 (перетаскивание файлов из системы прямо
+  // в плейлист): main.go пересылает СЮДА настоящие пути (webview-инпуту они
+  // недоступны), а какой плейлист активен — знает только фронт, поэтому
+  // импорт в него запускается уже здесь, не в Go. handleFilesDropped — метод
+  // самого стора (ниже), не отдельная замыкающая функция: ему нужен доступ
+  // к importing/importProgress, которые уже показывает Audio.svelte.
+  Events.On("audio_files_dropped", ({ data }: { data: string[] }) => {
+    void store.handleFilesDropped(data ?? []);
+  });
 
-  return {
+  const store = {
     tracks,
 
     get importing() {
@@ -246,6 +295,73 @@ const createAudioStore = () => {
 
     cancelImport() {
       importCancelRequested = true;
+    },
+
+    /**
+     * Импортирует файлы И сразу добавляет каждый успешно импортированный
+     * трек в указанный плейлист — правка 1 ("Файлы добавляются сразу в
+     * плейлист, а не сначала в библиотеку"). Дубликаты (Duplicate: true) тоже
+     * добавляются: оператор мог намеренно перетащить уже импортированный
+     * файл ещё раз, в другой плейлист или в этот же — запрета на два
+     * элемента одного трека в списке нет.
+     *
+     * Ошибки отдельных файлов агрегируются в lastError здесь же (общий
+     * алерт вкладки), а не пробрасываются наружу отдельным состоянием: и
+     * кнопка «Импорт», и перетаскивание (handleFilesDropped ниже) идут через
+     * этот метод, так что дублировать агрегацию в каждом вызывающем не нужно.
+     *
+     * Один AddTracksToPlaylist пачкой, а не AddToPlaylist на каждый файл:
+     * последний на бэке эмитит полный audio_playlists_update на КАЖДЫЙ
+     * вызов — на 50 файлах это 50 лишних полных перерисовок вкладки, пока
+     * играет звук. Пачка — одна транзакция, один emit.
+     */
+    async importFilesToPlaylist(
+      paths: string[],
+      playlistId: number,
+    ): Promise<ImportTrackResult[]> {
+      const results = await this.importFiles(paths);
+      const importedTrackIds = results
+        .filter((r) => r.track && !r.error)
+        .map((r) => r.track!.ID);
+      if (importedTrackIds.length > 0) {
+        await AddTracksToPlaylist(playlistId, importedTrackIds);
+      }
+      await this.refreshPlaylists();
+
+      const errors = results.filter((r) => r.error).map((r) => r.error);
+      if (errors.length === 1) {
+        lastError = `не удалось импортировать файл: ${errors[0]}`;
+      } else if (errors.length > 1) {
+        lastError = `не удалось импортировать ${errors.length} файл(ов): ${errors[0]}`;
+      }
+      return results;
+    },
+
+    /**
+     * Обрабатывает audio_files_dropped (правка 2, перетаскивание файлов из
+     * системы на список плейлиста) — не-аудио расширения отфильтровываются
+     * здесь же, до попытки импорта (audioExtensions), остальное идёт тем же
+     * потоком, что и кнопка «Импорт». Нет активного плейлиста — оператор ещё
+     * не выбрал/не создал ни одного: явная ошибка вместо тихого игнора.
+     */
+    async handleFilesDropped(paths: string[]) {
+      if (paths.length === 0) return;
+      const active = playlists.active;
+      if (!active) {
+        lastError =
+          "выберите или создайте плейлист слева, прежде чем перетаскивать файлы";
+        return;
+      }
+      const supported = paths.filter(hasAudioExtension);
+      const unsupportedCount = paths.length - supported.length;
+      if (supported.length > 0) {
+        await this.importFilesToPlaylist(supported, active.ID);
+      }
+      if (unsupportedCount > 0 && supported.length === 0) {
+        lastError = `формат не поддерживается: ${unsupportedCount} файл(ов)`;
+      } else if (unsupportedCount > 0) {
+        lastError = `${unsupportedCount} файл(ов) пропущено — формат не поддерживается`;
+      }
     },
 
     async update(id: number, patch: Partial<TrackInput>) {
@@ -315,6 +431,13 @@ const createAudioStore = () => {
       if (playlists.active?.ID === id) playlists.active = null;
       await RemovePlaylist(id);
     },
+    // clearPlaylist — «Удалить всё» (правка 1): очищает список ПЛЮС удаляет
+    // из медиатеки+с диска треки, которые перестали использоваться хоть
+    // где-то (ClearPlaylist на бэке, тем же правилом, что и одиночный
+    // removeFromPlaylist).
+    async clearPlaylist(id: number) {
+      await ClearPlaylist(id);
+    },
     async setPlaylistFlags(id: number, patch: Partial<PlaylistFlagsInput>) {
       await SetPlaylistFlags(id, {
         autoAdvance: patch.autoAdvance ?? null,
@@ -372,6 +495,26 @@ const createAudioStore = () => {
         lastError = errorMessage(e);
       }
     },
+    // playOrToggleSelected — единая логика кнопки play/pause мини-плеера И
+    // клавиши Space на вкладке (правка 4, второй раунд): играет — пауза; на
+    // паузе — продолжить; ничего не загружено, но что-то выделено — играть
+    // выделенное; ничего не загружено и ничего не выделено — молча ничего
+    // не делать (кнопка в этом случае просто disabled, Space — no-op).
+    // Вынесено в стор, а не продублировано в MiniPlayer.svelte и
+    // Audio.svelte по отдельности, — чтобы эти два места не разошлись в
+    // поведении (Enter на вкладке остаётся отдельной, более явной командой
+    // "играть выбранное" — playSelectedPlaylistItem в Audio.svelte, её эта
+    // функция не заменяет).
+    async playOrToggleSelected(selectedItemId: number | null) {
+      if (playerState && playerState.status !== "idle") {
+        await this.toggle();
+        return;
+      }
+      const playlist = playlists.active;
+      const item = (playlist?.items ?? []).find((i) => i.ID === selectedItemId);
+      if (!playlist || !item) return;
+      await this.play(playlist.ID, item.ID);
+    },
     async next() {
       try {
         await Next();
@@ -424,6 +567,8 @@ const createAudioStore = () => {
       }
     },
   };
+
+  return store;
 };
 
 export const audioStore = createAudioStore();

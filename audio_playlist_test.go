@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/paths"
 )
 
 // testTrackSeq — см. uniqueTestDuration.
@@ -74,6 +76,36 @@ func TestAddToPlaylistAssignsNextPosition(t *testing.T) {
 	}
 	if p3.Items[2].TrackId != t3 {
 		t.Errorf("last item trackId = %d, want %d (Position должен идти n+1, не в начало)", p3.Items[2].TrackId, t3)
+	}
+}
+
+// TestAddTracksToPlaylistBatchesPositions — AddTracksToPlaylist (пакетный
+// импорт): один вызов добавляет N треков подряд с Position = n+1..n+N, как
+// N последовательных AddToPlaylist, но за одну транзакцию/один emit.
+func TestAddTracksToPlaylistBatchesPositions(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	playlist := a.CreatePlaylist("Пакет")
+	t1 := createTestTrack(t, "b1")
+	t2 := createTestTrack(t, "b2")
+	t3 := createTestTrack(t, "b3")
+
+	// Один уже существующий элемент — новые обязаны продолжить нумерацию, а
+	// не начать её заново с 1.
+	a.AddToPlaylist(float32(playlist.ID), float32(t1))
+
+	result := a.AddTracksToPlaylist(float32(playlist.ID), []uint{t2, t3})
+	if len(result.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(result.Items))
+	}
+	for i, it := range result.Items {
+		if it.Position != i+1 {
+			t.Errorf("item %d: Position = %d, want %d", i, it.Position, i+1)
+		}
+	}
+	if result.Items[1].TrackId != t2 || result.Items[2].TrackId != t3 {
+		t.Errorf("batch order not preserved: %+v", result.Items)
 	}
 }
 
@@ -190,6 +222,198 @@ func TestRemovePlayingItemStopsPlayback(t *testing.T) {
 
 	if st := a.State(); st.Status != string(statusIdle) {
 		t.Errorf("removing the playing item should stop playback, status = %q", st.Status)
+	}
+}
+
+// TestRemoveFromPlaylistDeletesUnusedTrack — правка 1: удаление элемента
+// удаляет трек (и его файл) из медиатеки, если трек больше не используется
+// ни в одном плейлисте.
+func TestRemoveFromPlaylistDeletesUnusedTrack(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	playlist := a.CreatePlaylist("Тест")
+	trackId := createTestTrack(t, "solo")
+	p := a.AddToPlaylist(float32(playlist.ID), float32(trackId))
+	itemId := p.Items[0].ID
+
+	var track models.AudioTrack
+	if err := inits.DB.First(&track, trackId).Error; err != nil {
+		t.Fatalf("read track before removal: %v", err)
+	}
+	mediaDir, err := paths.MediaDir()
+	if err != nil {
+		t.Fatalf("MediaDir: %v", err)
+	}
+	filePath := filepath.Join(mediaDir, track.FileName)
+	if _, err := os.Stat(filePath); err != nil {
+		t.Fatalf("track file should exist before removal: %v", err)
+	}
+
+	a.RemoveFromPlaylist(float32(itemId))
+
+	if err := inits.DB.First(&models.AudioTrack{}, trackId).Error; err == nil {
+		t.Error("track row should be deleted once its last playlist reference is gone")
+	}
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Errorf("track file should be deleted from disk, stat err = %v", err)
+	}
+}
+
+// TestRemoveFromPlaylistKeepsSharedTrack — правка 1: НЕ удаляет трек, если
+// он всё ещё используется в другом плейлисте (дедупликация по хешу — один
+// трек, несколько PlaylistItem).
+func TestRemoveFromPlaylistKeepsSharedTrack(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	p1 := a.CreatePlaylist("П1")
+	p2 := a.CreatePlaylist("П2")
+	trackId := createTestTrack(t, "shared")
+
+	item1 := a.AddToPlaylist(float32(p1.ID), float32(trackId)).Items[0]
+	a.AddToPlaylist(float32(p2.ID), float32(trackId))
+
+	a.RemoveFromPlaylist(float32(item1.ID))
+
+	if err := inits.DB.First(&models.AudioTrack{}, trackId).Error; err != nil {
+		t.Error("track row should survive while another playlist still references it")
+	}
+}
+
+// TestClearPlaylistDeletesUnusedTracks — «Удалить всё» ведёт себя как
+// одиночный RemoveFromPlaylist на каждый элемент: удаляет треки, у которых
+// не осталось ссылок, и сохраняет те, что ещё используются в другом
+// плейлисте.
+func TestClearPlaylistDeletesUnusedTracks(t *testing.T) {
+	setupAudioTestDB(t)
+	a := &AudioService{}
+
+	solo := a.CreatePlaylist("Соло")
+	shared := a.CreatePlaylist("Общий")
+
+	soloTrackId := createTestTrack(t, "solo-clear")
+	sharedTrackId := createTestTrack(t, "shared-clear")
+
+	a.AddToPlaylist(float32(solo.ID), float32(soloTrackId))
+	a.AddToPlaylist(float32(solo.ID), float32(sharedTrackId))
+	a.AddToPlaylist(float32(shared.ID), float32(sharedTrackId))
+
+	result := a.ClearPlaylist(float32(solo.ID))
+	if len(result.Items) != 0 {
+		t.Fatalf("expected 0 items after ClearPlaylist, got %d", len(result.Items))
+	}
+
+	if err := inits.DB.First(&models.AudioTrack{}, soloTrackId).Error; err == nil {
+		t.Error("solo track should be deleted, it had no other references")
+	}
+	if err := inits.DB.First(&models.AudioTrack{}, sharedTrackId).Error; err != nil {
+		t.Error("shared track should survive, still referenced by the other playlist")
+	}
+}
+
+// TestReorderPlayingPlaylistDoesNotStopPlayback — первоначальная жалоба
+// оператора: перестановка элементов игравшего плейлиста обрывала звук.
+// Position — свойство элемента, не его identity (см. модель состояния,
+// AGENTS.md) — перестановка не имеет права касаться звука.
+func TestReorderPlayingPlaylistDoesNotStopPlayback(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	playlist := a.CreatePlaylist("Порядок")
+	var itemIds []uint
+	for i := 0; i < 3; i++ {
+		tid := createTestTrack(t, "reorder")
+		p := a.AddToPlaylist(float32(playlist.ID), float32(tid))
+		itemIds = append(itemIds, p.Items[len(p.Items)-1].ID)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[0])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Fatalf("expected playing, got %q", st.Status)
+	}
+	playingBeforeReorder := a.State().TrackId
+
+	// Двигаем играющий элемент (Position=1) в конец списка целиком — та
+	// самая перестановка, которая раньше звала a.Stop().
+	newOrder := []uint{itemIds[1], itemIds[2], itemIds[0]}
+	a.ReorderPlaylist(float32(playlist.ID), newOrder)
+
+	st := a.State()
+	if st.Status != string(statusPlaying) {
+		t.Errorf("reordering the playing playlist stopped playback, status = %q, want %q", st.Status, statusPlaying)
+	}
+	if st.TrackId != playingBeforeReorder || st.ItemId != itemIds[0] {
+		t.Errorf("reorder changed what's playing: TrackId=%d ItemId=%d, want TrackId=%d ItemId=%d", st.TrackId, st.ItemId, playingBeforeReorder, itemIds[0])
+	}
+}
+
+// TestRemoveNonPlayingItemDoesNotBreakAutoAdvance — удаление НЕ играющего
+// элемента (в данном случае — того, что шёл СЛЕДУЮЩИМ) не должно оставить
+// автопереход без пары: refreshPending обязан пересчитать ответ и перескочить
+// через удалённый элемент на следующий за ним, а не потерять pending молча.
+func TestRemoveNonPlayingItemDoesNotBreakAutoAdvance(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	playlist := models.Playlist{Name: "Пропуск", AutoAdvance: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	var itemIds []uint
+	for i := 0; i < 3; i++ {
+		tid := createTestTrack(t, "skip")
+		item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: tid, Position: i + 1}
+		if err := inits.DB.Create(&item).Error; err != nil {
+			t.Fatalf("create item: %v", err)
+		}
+		itemIds = append(itemIds, item.ID)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[0])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+
+	// Удаляем средний элемент (itemIds[1]) — он не играет, но был "следующим"
+	// для preparePendingNext. После удаления играющий трек обязан
+	// перейти прямо на itemIds[2], а не остановиться молча.
+	a.RemoveFromPlaylist(float32(itemIds[1]))
+
+	driveUntil(t, a, func(st PlayerState) bool { return st.ItemId == itemIds[2] })
+}
+
+// TestRemovePlayingItemKeepsPlayingWhenTrackSharedElsewhere — единственная
+// настоящая причина остановки при удалении элемента — sharing violation при
+// удалении ФАЙЛА (deleteTrackIfUnused). Если трек ещё используется в другом
+// плейлисте, файл не удаляется, значит и стоп не нужен: играющий трек
+// доигрывает до конца.
+func TestRemovePlayingItemKeepsPlayingWhenTrackSharedElsewhere(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	p1 := a.CreatePlaylist("П1")
+	p2 := a.CreatePlaylist("П2")
+	trackId := createTestTrack(t, "shared-playing")
+
+	item1 := a.AddToPlaylist(float32(p1.ID), float32(trackId)).Items[0]
+	a.AddToPlaylist(float32(p2.ID), float32(trackId))
+
+	if err := a.Play(float32(p1.ID), float32(item1.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Fatalf("expected playing, got %q", st.Status)
+	}
+
+	a.RemoveFromPlaylist(float32(item1.ID))
+
+	if st := a.State(); st.Status != string(statusPlaying) {
+		t.Errorf("removing a playing item should not stop playback while its track is still referenced by another playlist, status = %q", st.Status)
 	}
 }
 

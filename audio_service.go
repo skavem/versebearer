@@ -105,7 +105,7 @@ func (a *AudioService) watchPlayerEvents() {
 			// Play() полноценно переоткроет устройство через ensureDevice, а
 			// не решит, что deviceOpen==true и всё ещё работает. Тихой
 			// подмены на другое устройство не делаем (план, этап 3).
-			a.invalidatePending()
+			a.dropPending() // устройство пропало — воспроизведение прервано физически, считать следующий не для чего
 			oldSrc := a.pl.forceIdleOnDeviceLost()
 			if oldSrc != nil {
 				oldSrc.Close()
@@ -130,7 +130,7 @@ func (a *AudioService) watchPlayerEvents() {
 // отложенное закрытие поискового индекса, см. main.go), и только в конце
 // остановить горутину-получатель событий.
 func (a *AudioService) ServiceShutdown() error {
-	a.invalidatePending() // иначе декодер заранее открытого следующего трека утекает открытым файловым хендлом
+	a.dropPending() // иначе декодер заранее открытого следующего трека утекает открытым файловым хендлом
 	if oldSrc := a.pl.stop(); oldSrc != nil {
 		oldSrc.Close()
 	}
@@ -280,14 +280,19 @@ func openTrackSource(mediaDir string, track models.AudioTrack) (src beep.StreamS
 	return src, format, trimStartFrame, nil
 }
 
-// Play начинает воспроизведение элемента плейлиста itemId. Повторный Play
-// на уже играющий itemId — no-op, не рестарт (И5): оператор, дважды
-// кликнувший по строке, не должен услышать, как трек начался заново.
+// Play начинает воспроизведение элемента плейлиста itemId. Повторный Play на
+// уже ЗАГРУЖЕННЫЙ itemId — no-op, не рестарт (И5, расширено): "загружен"
+// значит играет ИЛИ на паузе — isCurrentItem, а не isPlayingItem. Раньше
+// no-op проверялся только по "играет", и двойной клик/Enter по строке НА
+// ПАУЗЕ перезапускал трек с нуля — кнопка play в строке вела себя иначе,
+// потому что playItem во фронте (PlaylistPanel.svelte) отдельно ловит этот
+// случай и зовёт Toggle() сама; Play() обязан быть безопасен и без этой
+// подстраховки на фронте.
 func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	itemId := uint(itemIdF)
 	playlistId := uint(playlistIdF)
 
-	if a.pl.isPlayingItem(itemId) {
+	if a.pl.isCurrentItem(itemId) {
 		return nil
 	}
 
@@ -353,8 +358,11 @@ func (a *AudioService) Play(playlistIdF, itemIdF float32) error {
 	}
 	// Предыдущий заранее подготовленный "следующий" (для другого трека) уже
 	// не актуален — этот Play() мог быть ручным вмешательством оператора, а
-	// не автопереходом.
-	a.invalidatePending()
+	// не автопереходом. preparePendingNext ниже и сам корректно заменил бы
+	// устаревший pending (afterItemId у него другой), но дропаем явно —
+	// читаемее на месте вызова и не оставляет на дольше, чем нужно, шанс
+	// увидеть в State().NextTitle заголовок чужого трека.
+	a.dropPending()
 	a.emit("audio_track_changed", a.State())
 	// Этап 4: если playlistId принадлежит плейлисту с AutoAdvance, заранее
 	// открыть следующий элемент — decodeExt дорог (И3), и делать это по
@@ -372,7 +380,7 @@ func (a *AudioService) Toggle() {
 // не закрывается: следующий Play переиспользует уже открытое — дешевле, чем
 // поднимать WASAPI заново на каждый клик.
 func (a *AudioService) Stop() {
-	a.invalidatePending()
+	a.dropPending()
 	oldSrc := a.pl.stop()
 	if oldSrc != nil {
 		oldSrc.Close() // файловый IO — вне p.mu (И2/И3)
@@ -419,7 +427,7 @@ func (a *AudioService) Seek(msF float32) error {
 		// триггер: beep/flac отказывает в Seek на FLAC без seek-таблицы (наш
 		// собственный формат конвертации при импорте), vorbis — на любом
 		// отказе SetPosition, mp3 — на позиции за пределами файла.
-		a.invalidatePending() // "следующий" трек автоперехода больше не актуален — трек оборван, не доиграет
+		a.dropPending() // "следующий" трек автоперехода больше не актуален — трек оборван, не доиграет
 		if oldSrc := a.pl.abandonFailedSeek(gen, snap.src); oldSrc != nil {
 			oldSrc.Close() // файловый IO — вне p.mu (И2/И3)
 			a.emit("audio_stopped", nil)
@@ -457,7 +465,7 @@ func (a *AudioService) Seek(msF float32) error {
 // её конца. Когда она (гарантированно, за счёт внешнего beep.Take —
 // см. buildChain) дренируется, done придёт как обычное "трек доиграл", и
 // watchPlayerEvents обработает его как обычный конец воспроизведения:
-// invalidatePending здесь — по аналогии со Stop(), заранее подготовленный
+// dropPending здесь — по аналогии со Stop(), заранее подготовленный
 // "следующий" трек (автопереход) больше не актуален, раз оператор явно
 // остановил воспроизведение.
 //
@@ -478,7 +486,7 @@ func (a *AudioService) FadeOutStop() {
 		return
 	}
 
-	a.invalidatePending()
+	a.dropPending()
 
 	playlistId, _, ok := a.pl.currentItem()
 	if !ok {
@@ -547,4 +555,3 @@ func (a *AudioService) SetVolume(v float64) {
 		}
 	})
 }
-

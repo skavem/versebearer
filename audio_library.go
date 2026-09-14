@@ -88,6 +88,13 @@ func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.Audio
 	if input.GainDb != nil {
 		updates["gain_db"] = *input.GainDb
 	}
+	// decodingAffected — правка trim/gain могла сделать неверным уже
+	// подготовленный "следующий" трек автоперехода (этап 4): pending
+	// декодирован и посчитан (totalSamples/fadeSamples/trimStartFileFrame,
+	// gainDb) со старыми значениями — без пересчёта автопереход поставил бы
+	// устаревшую версию правки. Title/Artist на декодирование не влияют
+	// вообще — трогать pending ради них не нужно (лишний decodeExt, И3).
+	decodingAffected := input.TrimStartMs != nil || input.TrimEndMs != nil || input.GainDb != nil
 	if len(updates) > 0 {
 		if err := inits.DB.Model(&models.AudioTrack{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return nil, fmt.Errorf("не удалось сохранить изменения: %w", err)
@@ -97,12 +104,16 @@ func (a *AudioService) UpdateTrack(idF float32, input TrackInput) (*models.Audio
 		return nil, fmt.Errorf("трек не найден: %w", err)
 	}
 
-	// Правка trim/gain могла сделать неверным уже подготовленный "следующий"
-	// трек автоперехода (этап 4): pending декодирован и посчитан
-	// (totalSamples/fadeSamples/trimStartFileFrame) со старыми значениями —
-	// без инвалидации автопереход поставил бы устаревшую версию правки.
-	if a.pl != nil {
-		a.invalidatePendingForTrack(id)
+	// dropPendingForTrack сначала закрывает старый декодер (сохраняет
+	// playlistId/afterItemId, на который он указывал), а refreshPending
+	// заново открывает его УЖЕ по только что сохранённым trim/gain — так
+	// "следующий" трек переоткрывается со свежими значениями, а не просто
+	// исчезает до естественного следующего done (что дало бы дырку в
+	// автопереходе — тот самый класс бага, что и в audio_autoadvance.go).
+	if a.pl != nil && decodingAffected {
+		if playlistId, afterItemId, ok := a.dropPendingForTrack(id); ok {
+			a.refreshPending(playlistId, afterItemId)
+		}
 	}
 
 	a.emit("audio_tracks_update", a.ListTracks())
@@ -132,14 +143,21 @@ func (a *AudioService) RemoveTrack(idF float32) error {
 	// a.pl может быть nil в тестах, которые конструируют AudioService{} без
 	// NewAudioService (им движок не нужен) — RemoveTrack тогда просто
 	// пропускает шаг остановки, звука ни в одном таком тесте не бывает.
+	stopped := false
+	var pendingPlaylistId, pendingAfterItemId uint
+	pendingDropped := false
 	if a.pl != nil {
 		if a.pl.isCurrentTrack(id) {
 			a.Stop()
+			stopped = true
 		}
 		// Трек мог быть не текущим, а уже заранее открытым "следующим"
 		// (этап 4, автопереход) — тот же sharing-violation риск на Windows,
-		// только для decodeExt внутри buildPendingNext, а не Play.
-		a.invalidatePendingForTrack(id)
+		// только для decodeExt внутри fillPendingNext, а не для os.Remove
+		// ниже. Дропаем ДО удаления файла/строки (чтобы декодер точно
+		// закрылся раньше os.Remove), пересчитываем — ПОСЛЕ (когда БД уже не
+		// содержит удалённых ссылок, см. deleteTrackIfUnused).
+		pendingPlaylistId, pendingAfterItemId, pendingDropped = a.dropPendingForTrack(id)
 	}
 
 	if err := inits.DB.Where("track_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
@@ -154,6 +172,14 @@ func (a *AudioService) RemoveTrack(idF float32) error {
 
 	if err := inits.DB.Delete(&models.AudioTrack{}, id).Error; err != nil {
 		return err
+	}
+
+	// Стоп (isCurrentTrack) уже обнулил pending целиком через a.Stop() ->
+	// dropPending — нечего пересчитывать. Иначе, если удаляемый трек был
+	// pending каким-то другим, всё ещё играющим элементом, — пересчитываем,
+	// чтобы автопереход не остался без пары (см. audio_autoadvance.go).
+	if pendingDropped && !stopped {
+		a.refreshPending(pendingPlaylistId, pendingAfterItemId)
 	}
 
 	a.emit("audio_tracks_update", a.ListTracks())

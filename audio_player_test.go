@@ -113,6 +113,55 @@ func TestPlayIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPlayOnPausedItemDoesNotRestart — И5 расширено: no-op на Play() теперь
+// проверяется по "загружен" (isCurrentItem), не только "играет"
+// (isPlayingItem). Раньше двойной клик/Enter по строке на паузе рестартовал
+// трек с нуля — кнопка play в самой строке (PlaylistPanel.svelte, playItem)
+// уже ловила этот случай сама и звала Toggle(), но Play() обязан быть
+// безопасен и без этой подстраховки на фронте.
+func TestPlayOnPausedItemDoesNotRestart(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(44100)
+
+	src := filepath.Join(t.TempDir(), "pausetrack.wav")
+	writeTestWav(t, src, uniqueTestDuration()) // уникальная длительность — иначе бит-в-бит тот же хеш, что у TestPlayIsIdempotent, и rename падает Access is denied на Windows
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+
+	playlist := models.Playlist{Name: "Пауза"}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: res.Track.ID, Position: 1}
+	if err := inits.DB.Create(&item).Error; err != nil {
+		t.Fatalf("create playlist item: %v", err)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	a.Toggle() // пауза
+	if st := a.State(); st.Status != string(statusPaused) {
+		t.Fatalf("status after Toggle() = %q, want %q", st.Status, statusPaused)
+	}
+
+	a.pl.pos.Store(54321) // "прогресс" — настоящий рестарт (startTrack) обнулил бы его
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play on paused item: %v", err)
+	}
+
+	if st := a.State(); st.Status != string(statusPaused) {
+		t.Errorf("Play() on an already-loaded paused item should leave it paused, got status = %q (treated as a restart)", st.Status)
+	}
+	if got := a.pl.pos.Load(); got != 54321 {
+		t.Errorf("Play() on a paused item reset position to %d — treated as a restart, not a no-op", got)
+	}
+}
+
 // TestAudioServiceWithoutDevice — при недоступном устройстве вывода методы
 // сервиса возвращают ошибку (или тихо ничего не делают там, где ошибка не
 // нужна оператору), но не паникуют.

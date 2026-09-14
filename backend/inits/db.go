@@ -121,7 +121,33 @@ func init() {
 		gs.Version = "7"
 	}
 
+	// version < 8: экран «Медиатека» убран — импорт теперь всегда идёт сразу
+	// в текущий плейлист, и без хотя бы одного плейлиста импортировать стало
+	// бы некуда. Сеет один плейлист по умолчанию, если плейлистов ещё нет —
+	// см. seedDefaultPlaylist.
+	if versionLT(gs.Version, 8) {
+		seedDefaultPlaylist(db)
+		db.Model(&gs).Update("version", "8")
+		gs.Version = "8"
+	}
+
 	DB = db
+}
+
+// seedDefaultPlaylist создаёт плейлист «Плейлист», если плейлистов в базе
+// ещё нет вообще. Вынесена отдельно от миграционного блока (а не инлайнена
+// внутрь versionLT(gs.Version, 8)), чтобы быть тестируемой без завязки на
+// package init()/захардкоженный "test.db" (db_test.go). Проверка по count,
+// а не по версии: на versionLT(gs.Version, 8) она и так выполнится ровно
+// один раз за апгрейд, но count делает функцию идемпотентной и сама по
+// себе — повторный вызов на уже заселённой базе (например, ручной тест) не
+// плодит второй плейлист.
+func seedDefaultPlaylist(db *gorm.DB) {
+	var count int64
+	if err := db.Model(&models.Playlist{}).Count(&count).Error; err != nil || count > 0 {
+		return
+	}
+	db.Create(&models.Playlist{Name: "Плейлист"})
 }
 
 // defaultTheme is the hardcoded style used to seed the default theme on a fresh

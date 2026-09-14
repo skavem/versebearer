@@ -336,6 +336,200 @@ func TestFadeOutStopWhilePausedStops(t *testing.T) {
 	}
 }
 
+// TestTryAdvanceWithEmptyPendingStillAdvances — CRITICAL (модель состояния):
+// pending — не кэш поверх честного пути, а единственный механизм
+// автоперехода. Симулируем пропущенную где-то инвалидацию (dropPending без
+// последующего refreshPending — ровно баг, который чинит этот рефакторинг) и
+// проверяем, что tryAdvance всё равно переходит на следующий трек синхронно
+// (buildPendingSync), а не молча останавливается тишиной.
+func TestTryAdvanceWithEmptyPendingStillAdvances(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	var trackIds []uint
+	for i := 0; i < 2; i++ {
+		src := filepath.Join(t.TempDir(), "sync.wav")
+		writeTestWav(t, src, uniqueTestDuration())
+		res := a.ImportTrack(context.Background(), src)
+		if res.Error != "" {
+			t.Fatalf("ImportTrack: %s", res.Error)
+		}
+		trackIds = append(trackIds, res.Track.ID)
+	}
+
+	playlist := models.Playlist{Name: "Синхронный", AutoAdvance: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	var itemIds []uint
+	for i, tid := range trackIds {
+		item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: tid, Position: i + 1}
+		if err := inits.DB.Create(&item).Error; err != nil {
+			t.Fatalf("create playlist item: %v", err)
+		}
+		itemIds = append(itemIds, item.ID)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[0])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+
+	// Симулируем пропущенную инвалидацию: честный pending, который Play()
+	// только что подготовил, выбрасываем напрямую, БЕЗ пересчёта — a.pending
+	// остаётся nil, хотя AutoAdvance включён и следующий элемент есть.
+	a.dropPending()
+	a.pendingMu.Lock()
+	stillNil := a.pending == nil
+	a.pendingMu.Unlock()
+	if !stillNil {
+		t.Fatal("dropPending() should leave a.pending nil")
+	}
+
+	// Несмотря на пустой pending, tryAdvance обязан синхронно посчитать и
+	// открыть следующий трек (buildPendingSync) — заминка вместо тишины.
+	driveUntil(t, a, func(st PlayerState) bool { return st.ItemId == itemIds[1] })
+}
+
+// setupTwoTrackAutoAdvance — общий фикстур для тестов правки трека, влияющей
+// (или нет) на pending: playlist AutoAdvance=true с двумя элементами, первый
+// уже играет — pending на второй уже подготовлен и опубликован синхронно
+// (см. preparePendingNext) к моменту, когда a.Play() возвращает управление.
+func setupTwoTrackAutoAdvance(t *testing.T) (a *AudioService, itemIds, trackIds []uint) {
+	t.Helper()
+	setupPlayerTestDB(t)
+	a = NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	for i := 0; i < 2; i++ {
+		src := filepath.Join(t.TempDir(), "edit.wav")
+		writeTestWav(t, src, uniqueTestDuration())
+		res := a.ImportTrack(context.Background(), src)
+		if res.Error != "" {
+			t.Fatalf("ImportTrack: %s", res.Error)
+		}
+		trackIds = append(trackIds, res.Track.ID)
+	}
+
+	playlist := models.Playlist{Name: "Правка", AutoAdvance: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	for i, tid := range trackIds {
+		item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: tid, Position: i + 1}
+		if err := inits.DB.Create(&item).Error; err != nil {
+			t.Fatalf("create playlist item: %v", err)
+		}
+		itemIds = append(itemIds, item.ID)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(itemIds[0])); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	return a, itemIds, trackIds
+}
+
+// currentPending — снимок a.pending под pendingMu, для сравнения identity
+// (переоткрылся декодер или нет) в тестах ниже.
+func currentPending(a *AudioService) *pendingNext {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	return a.pending
+}
+
+// TestUpdateTrackTitleDoesNotTouchPending — правка Title/Artist не влияет на
+// декодирование, значит и не должна трогать уже открытый pending (лишний
+// decodeExt на каждую правку названия недопустим при живом эфире).
+func TestUpdateTrackTitleDoesNotTouchPending(t *testing.T) {
+	a, _, trackIds := setupTwoTrackAutoAdvance(t)
+
+	pendingBefore := currentPending(a)
+	if pendingBefore == nil {
+		t.Fatal("expected pending to be prepared for the second track after Play()")
+	}
+
+	newTitle := "Новое название"
+	if _, err := a.UpdateTrack(float32(trackIds[1]), TrackInput{Title: &newTitle}); err != nil {
+		t.Fatalf("UpdateTrack: %v", err)
+	}
+
+	if got := currentPending(a); got != pendingBefore {
+		t.Error("editing Title should not touch pending — it does not affect decoding")
+	}
+}
+
+// TestUpdateTrackTrimReopensPending — TrimStartMs/TrimEndMs/GainDb ЯВЛЯЮТСЯ
+// baked into the already-open pending decoder (seek position,
+// totalSamples/fadeSamples, gain) — правка обязана переоткрыть его со свежими
+// значениями, а не просто выбросить (иначе следующий трек исчезает вместо
+// переоткрытия, см. audio_library.go/UpdateTrack).
+func TestUpdateTrackTrimReopensPending(t *testing.T) {
+	a, _, trackIds := setupTwoTrackAutoAdvance(t)
+
+	pendingBefore := currentPending(a)
+	if pendingBefore == nil {
+		t.Fatal("expected pending to be prepared for the second track after Play()")
+	}
+
+	newTrimStart := 10
+	if _, err := a.UpdateTrack(float32(trackIds[1]), TrackInput{TrimStartMs: &newTrimStart}); err != nil {
+		t.Fatalf("UpdateTrack: %v", err)
+	}
+
+	pendingAfter := currentPending(a)
+	if pendingAfter == nil {
+		t.Fatal("editing trim should reopen pending, not just drop it — auto-advance would lose its target")
+	}
+	if pendingAfter == pendingBefore {
+		t.Error("editing trim should reopen (replace) the pending decoder, not reuse the stale one")
+	}
+}
+
+// TestUpdateTrackGainKeepsSingleItemLoopAdvancing — частный случай из плана:
+// плейлист «Loop с одним треком» — pending указывает сам на себя
+// (forItemId == itemId). Правка громкости обязана переоткрыть его так, чтобы
+// зацикливание не сломалось.
+func TestUpdateTrackGainKeepsSingleItemLoopAdvancing(t *testing.T) {
+	setupPlayerTestDB(t)
+	a := NewAudioService()
+	a.pl.openDevice = fakeOpenDevice(8000)
+
+	src := filepath.Join(t.TempDir(), "loop1.wav")
+	writeTestWav(t, src, uniqueTestDuration())
+	res := a.ImportTrack(context.Background(), src)
+	if res.Error != "" {
+		t.Fatalf("ImportTrack: %s", res.Error)
+	}
+
+	playlist := models.Playlist{Name: "Один трек по кругу", AutoAdvance: true, Loop: true}
+	if err := inits.DB.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	item := models.PlaylistItem{PlaylistId: playlist.ID, TrackId: res.Track.ID, Position: 1}
+	if err := inits.DB.Create(&item).Error; err != nil {
+		t.Fatalf("create playlist item: %v", err)
+	}
+
+	if err := a.Play(float32(playlist.ID), float32(item.ID)); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+
+	pending := currentPending(a)
+	if pending == nil || pending.itemId != item.ID || pending.forItemId != item.ID {
+		t.Fatalf("expected pending to point at the same single item (Loop), got %+v", pending)
+	}
+
+	newGain := 6.0
+	if _, err := a.UpdateTrack(float32(res.Track.ID), TrackInput{GainDb: &newGain}); err != nil {
+		t.Fatalf("UpdateTrack: %v", err)
+	}
+
+	// Автопереход не должен сломаться: доигрывание по кругу продолжает
+	// работать после правки громкости уже открытого (самого на себя
+	// указывающего) pending.
+	driveUntil(t, a, func(st PlayerState) bool { return st.Status == string(statusPlaying) })
+}
+
 // TestInvalidatePendingClosesDecoderOnStopSetDeviceShutdown — план явно
 // предупреждает про риск утечки файлового хендлера заранее подготовленного
 // "следующего" трека (этап 4, decodePendingNext), если Stop/SetDevice/

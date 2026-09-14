@@ -1,6 +1,63 @@
 package inits
 
-import "testing"
+import (
+	"testing"
+
+	"changeme/backend/models"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+// TestSeedDefaultPlaylistIdempotent — план, правка 1: миграция версии 8
+// сеет плейлист «Плейлист», если плейлистов ещё нет, и не плодит второй при
+// повторном вызове (в частности, на уже заселённой базе, которую снова
+// открыли).
+func TestSeedDefaultPlaylistIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Playlist{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	seedDefaultPlaylist(db)
+	seedDefaultPlaylist(db)
+
+	var playlists []models.Playlist
+	if err := db.Find(&playlists).Error; err != nil {
+		t.Fatalf("find playlists: %v", err)
+	}
+	if len(playlists) != 1 {
+		t.Fatalf("expected exactly 1 seeded playlist after two calls, got %d", len(playlists))
+	}
+	if playlists[0].Name != "Плейлист" {
+		t.Errorf("seeded playlist name = %q, want %q", playlists[0].Name, "Плейлист")
+	}
+}
+
+// TestSeedDefaultPlaylistSkipsExisting — не создаёт "Плейлист", если
+// оператор уже создал свои плейлисты до апгрейда: count>0 значит "плейлисты
+// уже есть", а не "плейлист по умолчанию уже есть".
+func TestSeedDefaultPlaylistSkipsExisting(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Playlist{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	db.Create(&models.Playlist{Name: "Служебный"})
+
+	seedDefaultPlaylist(db)
+
+	var count int64
+	db.Model(&models.Playlist{}).Count(&count)
+	if count != 1 {
+		t.Fatalf("expected existing playlist count to stay 1, got %d", count)
+	}
+}
 
 func TestVersionLT(t *testing.T) {
 	cases := []struct {

@@ -166,6 +166,12 @@ func findDeviceById(infos []malgo.DeviceInfo, id string) (malgo.DeviceInfo, bool
 // эффектов на уже открытое устройство воспроизведения (если оно есть — этот
 // вызов его не трогает вообще, ensureDevice не сериализован с ним намеренно:
 // enumerate — не realtime-путь и ничего в p не меняет).
+//
+// Правка 4 (модалка выбора устройства "с максимумом информации"): простое
+// перечисление (ctx.Devices) иногда отдаёт DeviceInfo.Formats пустым — тогда
+// за подробностями зовём ctx.DeviceInfo на КОНКРЕТНЫЙ id, отдельным вызовом
+// на устройство (не считать дешёвым, поэтому только когда Formats и правда
+// пуст, не для каждого устройства всегда).
 func defaultListPlaybackDevices() ([]malgo.DeviceInfo, error) {
 	ctx, err := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
 	if err != nil {
@@ -175,7 +181,22 @@ func defaultListPlaybackDevices() ([]malgo.DeviceInfo, error) {
 		ctx.Uninit()
 		ctx.Free()
 	}()
-	return ctx.Devices(malgo.Playback)
+	infos, err := ctx.Devices(malgo.Playback)
+	if err != nil {
+		return nil, err
+	}
+	for i, info := range infos {
+		if len(info.Formats) > 0 {
+			continue
+		}
+		if detailed, err := ctx.DeviceInfo(malgo.Playback, info.ID, malgo.Shared); err == nil {
+			infos[i] = detailed
+		}
+		// Отказ ctx.DeviceInfo — не повод падать или терять устройство из
+		// списка: просто остаётся без Formats, UI (правка 4) деградирует
+		// мягко, не рисуя "0 Гц".
+	}
+	return infos, nil
 }
 
 // closeDevice останавливает устройство и освобождает malgo-контекст.
@@ -199,4 +220,15 @@ func (p *player) closeDevice() {
 		ctx.Uninit()
 		ctx.Free()
 	}
+}
+
+// openDeviceSnapshot — "какое устройство сейчас реально открыто и на какой
+// частоте" для ListDevices (правка 4: "для активного устройства покажи
+// фактическую частоту, на которой оно открылось"). open==false, если
+// устройство ещё ни разу не открывалось в этой сессии (ленивое открытие,
+// см. ensureDevice) — тогда id/rate нулевые, вызывающий их не подставляет.
+func (p *player) openDeviceSnapshot() (open bool, id string, rate beep.SampleRate) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.deviceOpen, p.selectedDeviceId, p.devRate
 }

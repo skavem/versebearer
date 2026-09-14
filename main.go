@@ -80,6 +80,10 @@ func main() {
 		Width:     900,
 		MinHeight: 700,
 		Height:    700,
+		// EnableFileDrop — правка 2 (перетаскивание фонограмм из системы):
+		// без него элементы с data-file-drop-target не порождают
+		// WindowFilesDropped вовсе.
+		EnableFileDrop: true,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
@@ -114,6 +118,29 @@ func main() {
 	// the screen can change without a plain move.
 	mainWindow.RegisterHook(events.Common.WindowDidMove, emitCurrentScreen)
 	mainWindow.RegisterHook(events.Common.WindowDidResize, emitCurrentScreen)
+
+	// Правка 2: файлы, брошенные на элемент с data-file-drop-target
+	// (список плейлиста — PlaylistPanel.svelte), приходят сюда с
+	// НАСТОЯЩИМИ путями (ctx.setDroppedFiles, webview_window.go:1404) — то,
+	// что нужно ImportTrack, и то, чего у веб-инпута нет вообще. Go здесь
+	// только пересылает пути фронту одним событием: какую именно фонограмму
+	// импортировать и в какой плейлист добавить решает уже сама вкладка
+	// «Звук» (activePlaylist живёт во фронтовом сторе, не здесь).
+	//
+	// ⚠️ Именно OnWindowEvent, НЕ RegisterHook: handleDragAndDropMessage
+	// (webview_window.go:1404-1419) читает подписчиков броска файлов ТОЛЬКО
+	// из w.eventListeners (что кладёт OnWindowEvent), а RegisterHook кладёт
+	// в отдельную карту w.eventHooks, которую этот обработчик не смотрит —
+	// с RegisterHook колбэк не вызывается никогда. Остальные подписки в этом
+	// файле (WindowDidMove/WindowDidResize/WindowClosing) намеренно остаются
+	// на RegisterHook — их обработчики читают именно eventHooks.
+	mainWindow.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		files := e.Context().DroppedFiles()
+		if len(files) == 0 {
+			return
+		}
+		audioService.emit("audio_files_dropped", files)
+	})
 
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(_ *application.WindowEvent) {
 		mainID := mainWindow.ID()

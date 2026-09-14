@@ -41,6 +41,20 @@ func setupAudioTestDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open in-memory sqlite: %v", err)
 	}
+	// SetMaxOpenConns(1) — рефакторинг модели состояния добавил tryAdvance
+	// честный синхронный запасной путь (buildPendingSync, audio_autoadvance.go):
+	// при пустом pending watchPlayerEvents теперь САМА читает БД, конкурентно
+	// с вызывающим тест кодом в основной горутине. ":memory:" без shared cache
+	// — отдельная БД НА КАЖДОЕ соединение database/sql; без лимита пул мог
+	// открыть второе соединение под конкурентный запрос, и это второе
+	// соединение видело бы пустую, немигрированную базу ("no such table") —
+	// не гонка по данным, а гонка по тому, какая физическая база отвечает.
+	// Один-единственный коннекшен сериализует доступ, как и обычный файл БД
+	// в продакшене (тот всегда один физический файл независимо от числа
+	// соединений).
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
 	if err := db.AutoMigrate(&models.AudioTrack{}, &models.Playlist{}, &models.PlaylistItem{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}

@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/paths"
 
 	"gorm.io/gorm"
 )
@@ -76,16 +79,17 @@ func (a *AudioService) RenamePlaylist(idF float32, name string) []models.Playlis
 	return playlists
 }
 
-// RemovePlaylist удаляет плейлист и все его элементы. Единое правило (план,
-// этап 4): если сейчас играет (или на паузе) что-то из этого плейлиста —
-// воспроизведение останавливается первым делом, иначе горутина автоперехода
-// станет искать следующий элемент среди мягко удалённых строк.
+// RemovePlaylist удаляет плейлист и все его элементы. Если сейчас играет
+// (или на паузе) что-то из ИМЕННО этого плейлиста — воспроизведение
+// останавливается первым делом, иначе горутина автоперехода станет искать
+// следующий элемент среди мягко удалённых строк. Если играет что-то из
+// ДРУГОГО плейлиста — не трогаем ни его, ни его pending: мутация чужого
+// плейлиста не физическая причина остановки (см. модель состояния,
+// AGENTS.md).
 func (a *AudioService) RemovePlaylist(idF float32) []models.Playlist {
 	id := uint(idF)
 	if a.pl != nil && a.pl.isCurrentPlaylist(id) {
 		a.Stop()
-	} else {
-		a.invalidatePending()
 	}
 
 	if err := inits.DB.Where("playlist_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
@@ -104,8 +108,10 @@ func (a *AudioService) RemovePlaylist(idF float32) []models.Playlist {
 
 // SetPlaylistFlags правит AutoAdvance/Loop/FadeMs. Если сейчас играет элемент
 // именно этого плейлиста, ранее подготовленный (или не подготовленный)
-// pending мог стать неверным при смене флагов "на лету" — пересчитываем его
-// сразу, а не ждём естественного следующего done.
+// pending мог стать неверным при смене флагов "на лету" — refreshPending
+// пересчитывает его сразу (и не переоткрывает декодер, если ответ на самом
+// деле не изменился — см. preparePendingNext), а не ждёт естественного
+// следующего done.
 func (a *AudioService) SetPlaylistFlags(idF float32, input PlaylistFlagsInput) *models.Playlist {
 	id := uint(idF)
 	updates := map[string]any{}
@@ -125,27 +131,19 @@ func (a *AudioService) SetPlaylistFlags(idF float32, input PlaylistFlagsInput) *
 		}
 	}
 
-	if a.pl != nil {
-		if playlistId, itemId, ok := a.pl.currentItem(); ok && playlistId == id {
-			a.invalidatePending()
-			a.preparePendingNext(id, itemId)
-		}
-	}
+	a.refreshPendingForPlaylist(id)
 
 	playlist := a.playlistWithItems(id)
 	a.emit("audio_playlists_update", a.ListPlaylists())
 	return playlist
 }
 
-// AddToPlaylist добавляет трек в конец плейлиста (Position = n+1).
-//
-// ⚠️ Известное упрощение: если сейчас играет последний элемент плейлиста с
-// AutoAdvance+Loop, уже подготовленный pending был вычислен как "обёртка на
-// первый" — добавление нового элемента в конец его не отменяет, новый трек
-// станет действительно последним только со следующего прохода. План не
-// требует пересчёта pending на AddToPlaylist (в отличие от Remove/Reorder,
-// где иначе автопереход искал бы несуществующий элемент), поэтому сознательно
-// не усложняем.
+// AddToPlaylist добавляет трек в конец плейлиста (Position = n+1). Если
+// сейчас играет элемент именно этого плейлиста, пересчитываем pending —
+// добавленный трек мог стать новым "следующим" (например, играет последний
+// элемент плейлиста с AutoAdvance+Loop: раньше pending был вычислен как
+// "обёртка на первый", а с новым элементом в конце правильный ответ —
+// только что добавленный трек).
 func (a *AudioService) AddToPlaylist(playlistIdF, trackIdF float32) *models.Playlist {
 	playlistId := uint(playlistIdF)
 	trackId := uint(trackIdF)
@@ -163,15 +161,68 @@ func (a *AudioService) AddToPlaylist(playlistIdF, trackIdF float32) *models.Play
 		return nil
 	}
 
+	a.refreshPendingForPlaylist(playlistId)
+
+	playlist := a.playlistWithItems(playlistId)
+	a.emit("audio_playlists_update", a.ListPlaylists())
+	return playlist
+}
+
+// AddTracksToPlaylist — как AddToPlaylist, но пачкой за один вызов: одна
+// транзакция, один audio_playlists_update. Нужен импорту (audioStore.
+// importFilesToPlaylist): раньше он звал AddToPlaylist по одному на файл, и
+// КАЖДЫЙ вызов эмитил полный список плейлистов — на 50 файлах 50 лишних
+// перерисовок фронта во время работающего звука. trackIds — уже успешно
+// импортированные (порядок сохраняется, как позиция в конце списка).
+func (a *AudioService) AddTracksToPlaylist(playlistIdF float32, trackIds []uint) *models.Playlist {
+	playlistId := uint(playlistIdF)
+	if len(trackIds) == 0 {
+		return a.playlistWithItems(playlistId)
+	}
+
+	var count int64
+	if err := inits.DB.Model(&models.PlaylistItem{}).Where("playlist_id = ?", playlistId).Count(&count).Error; err != nil {
+		log.Println("AddTracksToPlaylist: error counting items", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось добавить треки в плейлист: %s", err.Error()))
+		return nil
+	}
+
+	err := inits.DB.Transaction(func(tx *gorm.DB) error {
+		for i, trackId := range trackIds {
+			item := models.PlaylistItem{PlaylistId: playlistId, TrackId: trackId, Position: int(count) + i + 1}
+			if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Println("AddTracksToPlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось добавить треки в плейлист: %s", err.Error()))
+		return nil
+	}
+
+	a.refreshPendingForPlaylist(playlistId)
+
 	playlist := a.playlistWithItems(playlistId)
 	a.emit("audio_playlists_update", a.ListPlaylists())
 	return playlist
 }
 
 // RemoveFromPlaylist удаляет один элемент и перенумеровывает оставшиеся в
-// 1..n. Единое правило (план, этап 4): если удаляемый элемент сейчас играет
-// (или на паузе) — сначала остановить, иначе PlayerState.PlaylistId/ItemId
-// после удаления указывали бы в пустоту.
+// 1..n. Позиция и DB-строка элемента — не звук: удаление НЕ останавливает
+// воспроизведение само по себе, даже если удаляемый элемент сейчас играет —
+// открытый декодер уже не зависит от этой строки. Единственная настоящая
+// причина стопа — sharing violation при удалении ФАЙЛА, когда трек больше
+// нигде не используется, и это решение целиком живёт в deleteTrackIfUnused
+// (isCurrentTrack там), а не здесь.
+//
+// Правка 1 («убрать медиатеку как отдельный экран»): без отдельного экрана
+// осиротевшая запись AudioTrack стала бы недостижимой из UI, а её файл
+// копился бы в %LOCALAPPDATA% незаметно и навсегда. Поэтому после удаления
+// элемента трек проверяется на ссылки (deleteTrackIfUnused) — дедупликация
+// по хешу означает, что один трек может быть в нескольких плейлистах, и
+// удалять файл можно только когда исчезла последняя ссылка.
 func (a *AudioService) RemoveFromPlaylist(itemIdF float32) *models.Playlist {
 	itemId := uint(itemIdF)
 	var item models.PlaylistItem
@@ -180,12 +231,7 @@ func (a *AudioService) RemoveFromPlaylist(itemIdF float32) *models.Playlist {
 		return nil
 	}
 	playlistId := item.PlaylistId
-
-	if a.pl != nil && a.pl.isCurrentItem(itemId) {
-		a.Stop()
-	} else {
-		a.invalidatePending()
-	}
+	trackId := item.TrackId
 
 	err := inits.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Delete(&models.PlaylistItem{}, itemId).Error; err != nil {
@@ -211,9 +257,132 @@ func (a *AudioService) RemoveFromPlaylist(itemIdF float32) *models.Playlist {
 		return nil
 	}
 
+	a.deleteTrackIfUnused(trackId)
+
+	// Удалённый элемент мог быть тем, на кого указывал pending играющего
+	// именно этого плейлиста (deleteTrackIfUnused решает вопрос стопа только
+	// по trackId, не по позиции в списке) — пересчитываем ответ на "что
+	// дальше" заново; если он не изменился, decodePendingNext не перезапустится
+	// (см. preparePendingNext).
+	a.refreshPendingForPlaylist(playlistId)
+
 	playlist := a.playlistWithItems(playlistId)
 	a.emit("audio_playlists_update", a.ListPlaylists())
 	return playlist
+}
+
+// ClearPlaylist удаляет ВСЕ элементы плейлиста разом — кнопка «Удалить всё»
+// (правка 1). Правило со ссылками единое с RemoveFromPlaylist: каждый
+// затронутый трек проверяется на count>0 в ОСТАВШИХСЯ (не только этого
+// плейлиста) PlaylistItem, удаляется только если ссылок больше нет. Если
+// сейчас играет элемент ДРУГОГО плейлиста — не трогаем ни его, ни его
+// pending.
+func (a *AudioService) ClearPlaylist(idF float32) *models.Playlist {
+	id := uint(idF)
+
+	if a.pl != nil && a.pl.isCurrentPlaylist(id) {
+		a.Stop()
+	}
+
+	var items []models.PlaylistItem
+	if err := inits.DB.Where("playlist_id = ?", id).Find(&items).Error; err != nil {
+		log.Println("ClearPlaylist: error reading items", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось прочитать плейлист: %s", err.Error()))
+		return a.playlistWithItems(id)
+	}
+
+	if err := inits.DB.Where("playlist_id = ?", id).Delete(&models.PlaylistItem{}).Error; err != nil {
+		log.Println("ClearPlaylist: error", err)
+		a.emit("audio_error", fmt.Sprintf("не удалось очистить плейлист: %s", err.Error()))
+		return a.playlistWithItems(id)
+	}
+
+	// Дедупликация: два элемента ЭТОГО плейлиста иногда ссылаются на один и
+	// тот же трек (тот же файл добавили дважды) — deleteTrackIfUnused и так
+	// безопасен на повторный вызов (второй раз count уже 0, First не находит
+	// строку и тихо возвращается), но не звать его дважды на один trackId
+	// дешевле.
+	seen := make(map[uint]bool, len(items))
+	for _, it := range items {
+		if seen[it.TrackId] {
+			continue
+		}
+		seen[it.TrackId] = true
+		a.deleteTrackIfUnused(it.TrackId)
+	}
+
+	playlist := a.playlistWithItems(id)
+	a.emit("audio_playlists_update", a.ListPlaylists())
+	return playlist
+}
+
+// deleteTrackIfUnused удаляет трек из медиатеки (файл + строка), если на
+// него не осталось ни одной ссылки (PlaylistItem.TrackId) ни в одном
+// плейлисте. Общий хвост RemoveFromPlaylist и ClearPlaylist — правка 1:
+// «удаление элемента из плейлиста удаляет трек и файл с диска, ЕСЛИ трек
+// больше не используется ни в одном плейлисте».
+//
+// ⚠️ Это единственное место, где решается "остановить или доиграть" для
+// удаляемого трека — и решение основано ИСКЛЮЧИТЕЛЬНО на физике: os.Remove
+// на Windows падает с sharing violation, пока файл держит открытый декодер.
+// Трек ещё используется в другом плейлисте (count>0, ранний возврат выше) —
+// файл не удаляется, значит и стоп не нужен: если этот же трек играет через
+// какой-то другой элемент прямо сейчас, он спокойно доигрывает до конца,
+// просто не унаследует автопереход (см. tryAdvance/refreshPending).
+// Единственная ссылка — файл будет стёрт с диска, и тогда остановка
+// обязательна, если трек именно сейчас звучит.
+//
+// dropPendingForTrack — та же sharing-violation защита для decodeExt внутри
+// fillPendingNext: трек мог быть не текущим, а заранее открытым
+// "следующим". playlistId/afterItemId, что он вернёт, используются ПОСЛЕ
+// удаления файла/строки — пересчитывать pending раньше означало бы читать
+// БД, которая ещё не отражает само удаление.
+func (a *AudioService) deleteTrackIfUnused(trackId uint) {
+	var count int64
+	if err := inits.DB.Model(&models.PlaylistItem{}).Where("track_id = ?", trackId).Count(&count).Error; err != nil {
+		log.Println("deleteTrackIfUnused: error counting references", err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	var track models.AudioTrack
+	if err := inits.DB.First(&track, trackId).Error; err != nil {
+		return // уже удалён кем-то ещё — нечего делать
+	}
+
+	stopped := false
+	var pendingPlaylistId, pendingAfterItemId uint
+	pendingDropped := false
+	if a.pl != nil {
+		if a.pl.isCurrentTrack(trackId) {
+			a.Stop()
+			stopped = true
+		}
+		pendingPlaylistId, pendingAfterItemId, pendingDropped = a.dropPendingForTrack(trackId)
+	}
+
+	if mediaDir, err := paths.MediaDir(); err == nil && track.FileName != "" {
+		if err := os.Remove(filepath.Join(mediaDir, track.FileName)); err != nil && !os.IsNotExist(err) {
+			log.Println("deleteTrackIfUnused: error deleting file", err)
+		}
+	}
+
+	if err := inits.DB.Delete(&models.AudioTrack{}, trackId).Error; err != nil {
+		log.Println("deleteTrackIfUnused: error deleting row", err)
+		return
+	}
+
+	// Стоп уже сам обнулил pending целиком (a.Stop -> dropPending) — нечего
+	// пересчитывать. Иначе, если pending реально держал этот трек, — то, что
+	// он играющий, пересчитываем заново теперь, когда БД уже не содержит
+	// удалённой строки.
+	if pendingDropped && !stopped {
+		a.refreshPending(pendingPlaylistId, pendingAfterItemId)
+	}
+
+	a.emit("audio_tracks_update", a.ListTracks())
 }
 
 // ReorderPlaylist проставляет позиции РОВНО по порядку переданного массива
@@ -223,17 +392,17 @@ func (a *AudioService) RemoveFromPlaylist(itemIdF float32) *models.Playlist {
 // выражать это как последовательность обменов было бы и сложнее, и менее
 // прямым способом получить тот же результат. Осознанное отличие от образца.
 //
-// Единое правило (план, этап 4): если сейчас играет элемент именно этого
-// плейлиста — останавливаем, потому что смена позиций делает недействительным
-// уже вычисленный (или готовящийся) "следующий" элемент автоперехода.
+// ⚠️ Перестановка НЕ трогает звук. Position — свойство элемента, не его
+// identity: воспроизведение привязано к itemId и уже открытому декодеру, а
+// не к месту в списке (см. модель состояния, AGENTS.md), поэтому смена
+// порядка не имеет права останавливать то, что играет — это была
+// первоначальная жалоба оператора ("переставил элементы — звук оборвался").
+// После транзакции — один refreshPendingForPlaylist, и только если сейчас
+// играет элемент ИМЕННО этого плейлиста: перестановка могла изменить ответ
+// на "что дальше после текущего", и его нужно пересчитать, но не переоткрыть
+// декодер зря, если ответ на самом деле не изменился (см. preparePendingNext).
 func (a *AudioService) ReorderPlaylist(playlistIdF float32, itemIds []uint) *models.Playlist {
 	playlistId := uint(playlistIdF)
-
-	if a.pl != nil && a.pl.isCurrentPlaylist(playlistId) {
-		a.Stop()
-	} else {
-		a.invalidatePending()
-	}
 
 	err := inits.DB.Transaction(func(tx *gorm.DB) error {
 		for i, id := range itemIds {
@@ -250,6 +419,8 @@ func (a *AudioService) ReorderPlaylist(playlistIdF float32, itemIds []uint) *mod
 		a.emit("audio_error", fmt.Sprintf("не удалось изменить порядок плейлиста: %s", err.Error()))
 		return nil
 	}
+
+	a.refreshPendingForPlaylist(playlistId)
 
 	playlist := a.playlistWithItems(playlistId)
 	a.emit("audio_playlists_update", a.ListPlaylists())

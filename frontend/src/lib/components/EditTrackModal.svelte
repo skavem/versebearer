@@ -136,6 +136,17 @@
         </button>
       </div>
 
+      {#if isThisTrackLoaded}
+        <!-- Trim применяется только при следующем запуске трека, НЕ на
+        лету (см. audio_library.go/UpdateTrack): пересборка цепочки
+        воспроизведения "как при перемотке" посреди эфира — риск щелчка и
+        прыжка позиции. Оператор должен это знать до сохранения, не после. -->
+        <div class="alert alert-warning mb-2 py-2 text-sm">
+          <MuiIcon name="info" style="font-size: 1.1rem" />
+          <span>Трек сейчас в эфире — обрезка применится со следующего запуска</span>
+        </div>
+      {/if}
+
       <div class="flex flex-col gap-3">
         <label class="form-control">
           <div class="label py-1">
