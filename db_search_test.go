@@ -1,25 +1,35 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
 	"changeme/backend/search"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // withSearchIndex поднимает временный индекс на обработчике. Путь берётся из
-// TempDir, а не из searchIndexPath, чтобы тест не трогал рабочий индекс рядом
-// с test.db.
+// TempDir, а не из paths.SearchIndexPath(), чтобы тест не трогал рабочий
+// индекс оператора.
 func withSearchIndex(t *testing.T, g *DbHandler) {
 	t.Helper()
-	idx, err := search.Open(filepath.Join(t.TempDir(), "idx.bleve"))
+	path := filepath.Join(t.TempDir(), "idx.bleve")
+	idx, err := search.Open(path)
 	if err != nil {
 		t.Fatalf("open index: %v", err)
 	}
 	t.Cleanup(func() { idx.Close() })
 	g.searchIdx = idx
+	// searchIdxPath — иначе RebuildSearchIndex не найдёт куда писать маркер
+	// завершённой сборки и (безопасно) пропустит его, но тест тогда не
+	// проверял бы реальный путь выполнения.
+	g.searchIdxPath = path
 }
 
 // seedBible создаёт минимальный перевод: одна книга, одна глава, два стиха.
@@ -160,4 +170,105 @@ func TestParseReference(t *testing.T) {
 	if got := g.ParseReference("Ин 99:1", float32(translationId)); got != nil {
 		t.Errorf("несуществующая глава разобралась: %+v", got)
 	}
+}
+
+// TestRebuildSearchIndexMarkerNotRestoredOnFailure — LOW-раздел «Новые
+// тесты» обзора: маркер завершённой сборки (searchIndexCompleteMarker)
+// обязан сниматься ДО Reset() и писаться только ПОСЛЕ успеха — у механики
+// раньше не было ни одного сторожа.
+func TestRebuildSearchIndexMarkerNotRestoredOnFailure(t *testing.T) {
+	// Намеренно НЕ setupTestDB: пустая, немигрированная база даёт надёжный,
+	// портируемый отказ — Reset() успешно отрабатывает на чистом индексе
+	// (созданном withSearchIndex мгновением раньше, ничто ему не мешает), а
+	// первый же запрос к базе внутри RebuildSearchIndex
+	// (inits.DB.Find(&translations)) падает на "no such table: translations".
+	// Заставить сорваться сам Reset() портируемо не удалось: единственный
+	// проверенный на практике способ (подменить родительский каталог
+	// индекса файлом) уничтожает и сам маркер как побочный эффект — маркер
+	// лежит рядом с каталогом индекса, в том же родителе, так что тест
+	// перестаёт что-либо доказывать. Этот сценарий проверяет то же самое
+	// важное свойство с другой стороны: маркер не переживает сорвавшуюся
+	// пересборку и не пишется заново, если она не дошла до конца.
+	bareDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open bare db: %v", err)
+	}
+	inits.DB = bareDB
+
+	g := &DbHandler{}
+	withSearchIndex(t, g)
+	marker := searchIndexCompleteMarker(g.searchIdxPath)
+
+	if err := os.WriteFile(marker, []byte{}, 0o644); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	if err := g.RebuildSearchIndex(); err == nil {
+		t.Fatal("RebuildSearchIndex с немигрированной базой = nil, want error")
+	}
+
+	// Маркер, существовавший до вызова, не пережил отказ — снят до того,
+	// как стало известно, что сборка сорвётся, и не восстановлен задним
+	// числом.
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Errorf("маркер пережил сорвавшуюся пересборку: stat err = %v", err)
+	}
+}
+
+// TestRebuildSearchIndexMarkerWrittenOnlyAfterSuccess — вторая половина той
+// же механики: маркер появляется ровно после успешной пересборки, не раньше.
+func TestRebuildSearchIndexMarkerWrittenOnlyAfterSuccess(t *testing.T) {
+	setupTestDB(t)
+	g := &DbHandler{}
+	withSearchIndex(t, g)
+	marker := searchIndexCompleteMarker(g.searchIdxPath)
+
+	seedBible(t)
+	seedTwoSongs(t)
+
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("маркер существует до первой сборки: stat err = %v", err)
+	}
+
+	if err := g.RebuildSearchIndex(); err != nil {
+		t.Fatalf("RebuildSearchIndex: %v", err)
+	}
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("маркер не записан после успешной сборки: %v", err)
+	}
+}
+
+// TestOpenSearchIndexRebuildsWhenMarkerMissing — маркер отсутствует →
+// openSearchIndex запускает фоновую сборку сам, без явного вызова
+// RebuildSearchIndex. Единственный тест в пакете, вызывающий настоящий
+// (g *DbHandler) openSearchIndex() — он ходит в paths.SearchIndexPath(),
+// то есть в единственный на весь процесс теста путь, заданный TestMain
+// (см. audio_import_test.go) через VERSEBEARER_DATA; больше ни один тест
+// этот путь не трогает, так что открыть его здесь безопасно — конфликтов
+// за блокировку индекса Bleve с другим тестом нет.
+func TestOpenSearchIndexRebuildsWhenMarkerMissing(t *testing.T) {
+	setupTestDB(t)
+	seedBible(t)
+	seedTwoSongs(t)
+
+	g := &DbHandler{}
+	if err := g.openSearchIndex(); err != nil {
+		t.Fatalf("openSearchIndex: %v", err)
+	}
+	t.Cleanup(func() {
+		if g.searchIdx != nil {
+			g.searchIdx.Close()
+		}
+	})
+
+	marker := searchIndexCompleteMarker(g.searchIdxPath)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("маркер %s не появился за 5с — фоновая сборка не запустилась при отсутствии маркера", marker)
 }

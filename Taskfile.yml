@@ -49,5 +49,9 @@ tasks:
 
   test:
     summary: Runs Go unit tests (in-memory SQLite, no Wails/frontend deps)
+    env:
+      # Пользовательские данные тестов — в мусорный каталог внутри репозитория
+      # (tmp/ в .gitignore), чтобы ни один прогон не смотрел в %LOCALAPPDATA%.
+      VERSEBEARER_DATA: '{{.TASKFILE_DIR}}/tmp/test-data'
     cmds:
-      - go test ./...
+      - go test -race ./...

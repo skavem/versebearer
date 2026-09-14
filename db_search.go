@@ -3,16 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"changeme/backend/inits"
 	"changeme/backend/models"
+	"changeme/backend/paths"
 	"changeme/backend/search"
 )
-
-// searchIndexPath — каталог индекса Bleve рядом с test.db (см. backend/inits).
-// Индекс полностью производен от SQLite: его можно удалить в любой момент,
-// на следующем старте он соберётся заново.
-const searchIndexPath = "search.bleve"
 
 // indexBatchSize — сколько документов уходит в Bleve за раз. Пачками индексация
 // идёт кратно быстрее поштучной, а 1000 стихов — это ещё некрупный кусок
@@ -34,22 +31,44 @@ type CoupletSearchHit struct {
 	Matches []search.Match `json:"matches"`
 }
 
-// openSearchIndex поднимает индекс и, если он пуст, запускает первичную сборку
-// в фоне. Сборка идёт именно в фоне: она занимает секунды, а окно оператора
-// должно открыться сразу — до готовности индекса работает вся программа, кроме
-// самого поиска.
+// searchIndexCompleteMarker — путь к маркеру завершённой сборки индекса
+// (Р13 ревизии). indexPath может быть пустым (например, в тестах, которые не
+// проставили g.searchIdxPath) — тогда marker тоже пустой, и вызывающие это
+// трактуют как "маркер не поддерживается, ничего не читаем/не пишем", а не
+// как файл ".complete" в текущем каталоге.
+func searchIndexCompleteMarker(indexPath string) string {
+	if indexPath == "" {
+		return ""
+	}
+	return indexPath + ".complete"
+}
+
+// openSearchIndex поднимает индекс и, если маркер завершённой сборки
+// отсутствует, запускает пересборку в фоне. Сборка идёт именно в фоне: она
+// занимает секунды, а окно оператора должно открыться сразу — до готовности
+// индекса работает вся программа, кроме самого поиска.
+//
+// Раньше решение принималось по idx.Count() == 0. Закрытие программы
+// посреди RebuildSearchIndex (Reset уже стёр индекс, пачки ещё не долились)
+// оставляет count > 0 — и по старому условию индекс НИКОГДА не пересобрался
+// бы сам, поиск навсегда остался бы неполным, молча. После переноса каждый
+// существующий пользователь один раз получает сборку с нуля на новом месте —
+// ровно тогда, когда программа и так стартует непривычно долго и её хочется
+// закрыть раньше времени; редкая прежде ловушка стала массовой. Маркер
+// дешевле сверки счётчиков с базой и не страдает от их дрейфа.
 func (g *DbHandler) openSearchIndex() error {
-	idx, err := search.Open(searchIndexPath)
+	indexPath, err := paths.SearchIndexPath()
+	if err != nil {
+		return err
+	}
+	idx, err := search.Open(indexPath)
 	if err != nil {
 		return err
 	}
 	g.searchIdx = idx
+	g.searchIdxPath = indexPath
 
-	count, err := idx.Count()
-	if err != nil {
-		return err
-	}
-	if count == 0 {
+	if _, err := os.Stat(searchIndexCompleteMarker(indexPath)); err != nil {
 		go func() {
 			if err := g.RebuildSearchIndex(); err != nil {
 				log.Println("Error building search index", err.Error())
@@ -59,8 +78,9 @@ func (g *DbHandler) openSearchIndex() error {
 	return nil
 }
 
-// RebuildSearchIndex собирает индекс с нуля. Вызывается автоматически при
-// пустом индексе и вручную из настроек, если индекс разошёлся с базой.
+// RebuildSearchIndex собирает индекс с нуля. Вызывается автоматически, когда
+// нет маркера завершённой сборки (см. openSearchIndex), и вручную из настроек,
+// если индекс разошёлся с базой.
 //
 // Две пересборки одновременно недопустимы: Reset закрывает и пересоздаёт
 // индекс, так что параллельная сборка писала бы в уже закрытый. Кнопка в
@@ -75,12 +95,26 @@ func (g *DbHandler) RebuildSearchIndex() (err error) {
 	}
 	defer g.rebuildMu.Unlock()
 
+	// Маркер снимается до Reset: обрыв посреди пересборки (закрытие
+	// программы, паника) не должен выглядеть завершённым для следующего
+	// openSearchIndex — см. комментарий к searchIndexCompleteMarker.
+	marker := searchIndexCompleteMarker(g.searchIdxPath)
+	if marker != "" {
+		os.Remove(marker)
+	}
+
 	// Об обрыве надо сказать интерфейсу. Прогресс он считает по событиям, и без
 	// этого сообщения строка поиска осталась бы с вечным «индексация N из M», а
 	// кнопка пересборки — заблокированной до перезапуска программы.
 	defer func() {
 		if err != nil {
 			g.emit("search_index_failed", err.Error())
+			return
+		}
+		if marker != "" {
+			if werr := os.WriteFile(marker, []byte{}, 0o644); werr != nil {
+				log.Println("Error writing search index complete marker", werr.Error())
+			}
 		}
 	}()
 

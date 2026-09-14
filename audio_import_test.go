@@ -10,7 +10,6 @@ import (
 	"changeme/backend/models"
 	"changeme/backend/paths"
 
-	"github.com/adrg/xdg"
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/generators"
 	"github.com/gopxl/beep/v2/wav"
@@ -19,16 +18,17 @@ import (
 )
 
 // TestMain points paths.MediaDir() at a fresh temp directory for the whole
-// test binary. DataDir/MediaDir memoize their result behind sync.Once, so the
-// env var has to be set before the very first call from any test in this
-// package — hence doing it here rather than per-test.
+// test binary via VERSEBEARER_DATA (the primary override paths.DataDir()
+// reads — see backend/paths/paths.go), not XDG_DATA_HOME. DataDir/MediaDir
+// memoize their result behind sync.Once, so the env var has to be set before
+// the very first call from any test in this package — hence doing it here
+// rather than per-test.
 func TestMain(m *testing.M) {
 	tmp, err := os.MkdirTemp("", "versebearer-audio-test-*")
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("XDG_DATA_HOME", tmp)
-	xdg.Reload()
+	os.Setenv("VERSEBEARER_DATA", tmp)
 
 	code := m.Run()
 	os.RemoveAll(tmp)

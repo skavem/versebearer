@@ -4,21 +4,22 @@
 # backend
 
 ## Purpose
-Go backend layer. Holds GORM model definitions, the global `*gorm.DB` connection initialized via package-init side effect, and a standalone seeder binary that imports `Bible.json` + `songs.json` into the SQLite DB.
+Go backend layer. Holds GORM model definitions, the global `*gorm.DB` connection (opened explicitly from `main()`, see `inits/`), the user-data-directory resolver (`paths/`), and a standalone seeder binary that imports `Bible.json` + `songs.json` into the SQLite DB.
 
 ## Subdirectories
 | Directory | Purpose |
 |-----------|---------|
 | `models/` | GORM struct definitions (Translation/Book/Chapter/Verse/Song/Couplet/Screen/GlobalState). See `models/AGENTS.md` |
-| `inits/` | DB connection + AutoMigrate, runs via `init()`. See `inits/AGENTS.md` |
+| `inits/` | `Open()`/`OpenAt()` + AutoMigrate + legacy-`test.db` migration, called explicitly from `main()`/`filler`. See `inits/AGENTS.md` |
+| `paths/` | Resolves the user data directory (SQLite DB, Bleve index, imported audio) — `%LOCALAPPDATA%\versebearer` by default, overridable via `VERSEBEARER_DATA`. No `AGENTS.md` of its own; see the package doc comment in `paths.go` |
 | `filler/` | Standalone `package main` that seeds SQLite from `Bible.json`/`songs.json`. See `filler/AGENTS.md` |
 
 ## For AI Agents
 
 ### Working In This Directory
 - Module imports use `changeme/backend/...` because `go.mod` is `module changeme`.
-- The `inits` package opens `test.db` in the CWD via `init()` — any package that imports it triggers DB open + AutoMigrate. That's intentional: `main.go`, `dbHandler.go`, and `filler/fillDb.go` all rely on it.
-- Adding a new model: add struct to `models/`, then register it in `inits/db.go`'s `AutoMigrate` call. Skip the AutoMigrate registration and the table won't exist.
+- The `inits` package has **no package `init()`** — importing it has zero side effects. The DB is opened by an explicit `inits.Open()` call, made once from `main()` (before `application.New`) and once from `filler/fillDb.go`'s own `main()`. Both call the same function; neither relies on import order.
+- Adding a new model: add struct to `models/`, then register it in `inits/db.go`'s `AutoMigrate` call (inside `OpenAt`). Skip the AutoMigrate registration and the table won't exist.
 
 ### Common Patterns
 - All entity structs embed `gorm.Model` — gives `ID`, `CreatedAt`, `UpdatedAt`, `DeletedAt`.

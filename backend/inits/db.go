@@ -1,10 +1,12 @@
 package inits
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 
 	"changeme/backend/models"
+	"changeme/backend/paths"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -26,13 +28,38 @@ func versionLT(v string, n int) bool {
 	return parsed < n
 }
 
-func init() {
-	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+// Open вычисляет путь к базе данных (paths.DBPath()), при необходимости
+// переносит найденную рядом с программой старую test.db (см. migrate.go) и
+// открывает базу по итоговому пути через OpenAt. Вызывается явно из main() —
+// НЕ из package init(): package init() отрабатывает до TestMain, то есть
+// VERSEBEARER_DATA, выставленная тестом, опоздала бы, а «go test», набранный
+// руками, продолжал бы открывать живую базу оператора при простом импорте
+// пакета. См. TestNoInitFunc, который пинит отсутствие init() в этом пакете.
+func Open() error {
+	dbPath, err := paths.DBPath()
 	if err != nil {
-		panic("failed to connect database")
+		return fmt.Errorf("не удалось определить путь к базе данных: %w", err)
 	}
 
-	db.AutoMigrate(
+	if _, err := migrateLegacyDB(dbPath, legacyDBCandidates()); err != nil {
+		return err
+	}
+
+	return OpenAt(dbPath)
+}
+
+// OpenAt открывает базу по явно заданному пути, прогоняет AutoMigrate и все
+// блоки версионных миграций и на успехе присваивает пакетную переменную DB.
+// Явный путь параметром (а не через paths) — чтобы OpenAt можно было
+// протестировать на временных файлах, не трогая ни paths, ни настоящий
+// AppData.
+func OpenAt(path string) error {
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		return &OpenFailedError{Path: path, Err: err}
+	}
+
+	if err := db.AutoMigrate(
 		&models.Translation{},
 		&models.Book{},
 		&models.Chapter{},
@@ -48,7 +75,9 @@ func init() {
 		&models.AudioTrack{},
 		&models.Playlist{},
 		&models.PlaylistItem{},
-	)
+	); err != nil {
+		return &OpenFailedError{Path: path, Err: fmt.Errorf("не удалось обновить схему: %w", err)}
+	}
 
 	// Ensure GlobalState row 1 exists
 	gs := models.GlobalState{}
@@ -133,6 +162,7 @@ func init() {
 	}
 
 	DB = db
+	return nil
 }
 
 // seedDefaultPlaylist создаёт плейлист «Плейлист», если плейлистов в базе

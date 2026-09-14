@@ -16,7 +16,6 @@ import (
 
 	"github.com/joho/godotenv"
 	sse "github.com/r3labs/sse/v2"
-	"gorm.io/gorm"
 )
 
 // outputStylePayload is the per-output slice of the sync event's "styles"
@@ -163,7 +162,6 @@ func createSSE(
 	songChannel chan *ShownCouplet,
 	qrChannel chan *bool,
 	styleChannel chan *StyleEvent,
-	db *gorm.DB,
 ) {
 	// .env is a dev convenience only (DEV=true serves the receiver from disk
 	// instead of the embedded FS). Production builds ship without it, so a
@@ -221,7 +219,7 @@ func createSSE(
 			return
 		}
 		var f models.Font
-		if err := db.First(&f, uint(id)).Error; err != nil {
+		if err := inits.DB.First(&f, uint(id)).Error; err != nil {
 			http.NotFound(w, r)
 			return
 		}
@@ -242,7 +240,7 @@ func createSSE(
 			return
 		}
 		var im models.Image
-		if err := db.First(&im, uint(id)).Error; err != nil {
+		if err := inits.DB.First(&im, uint(id)).Error; err != nil {
 			http.NotFound(w, r)
 			return
 		}

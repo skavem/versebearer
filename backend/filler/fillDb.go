@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -69,6 +70,20 @@ type SongsFileJson []struct {
 }
 
 func main() {
+	// Консольный инструмент — без нативного диалога, но текст важен так же:
+	// например у AmbiguousCandidatesError голый Error() называет только
+	// число кандидатов ("найдено несколько баз-кандидатов на перенос (2)"),
+	// а DialogBody() — ещё и список путей с размером и датой, и что делать
+	// дальше. Раз есть консоль (в отличие от GUI-сборки main.go), печатаем
+	// самый содержательный текст, какой есть.
+	if err := inits.Open(); err != nil {
+		type dialogBody interface{ DialogBody() string }
+		var db dialogBody
+		if errors.As(err, &db) {
+			log.Fatal(db.DialogBody())
+		}
+		log.Fatal(err)
+	}
 
 	// Путь можно передать аргументом, чтобы залить любой выгруженный перевод:
 	//   go run ./backend/filler tmp/bibles/nrt.json

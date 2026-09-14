@@ -3,7 +3,9 @@ package main
 import (
 	"embed"
 	_ "embed"
+	"errors"
 	"log"
+	"os"
 	"sync"
 
 	"changeme/backend/inits"
@@ -16,6 +18,15 @@ import (
 var assets embed.FS
 
 func main() {
+	// До всего остального: приложение без базы бессмысленно, а создание
+	// application.App (вебвью, ассет-сервер, цикл событий) только ради
+	// одного модального сообщения — дороже, чем нативный MessageBox до
+	// app.Run() (см. fatalDialog в fatal_windows.go/fatal_other.go).
+	if err := inits.Open(); err != nil {
+		fatalDialog("VerseBearer", startupFailureText(err))
+		os.Exit(1)
+	}
+
 	bibleChannel, songChannel, qrChannel, styleChannel := createChannels()
 	dbHandler := DbHandler{
 		qr:     qrChannel,
@@ -33,7 +44,7 @@ func main() {
 		hideEvt: "hide_couplet",
 		emit:    dbHandler.emit,
 	}
-	go createSSE(bibleChannel, songChannel, qrChannel, styleChannel, inits.DB)
+	go createSSE(bibleChannel, songChannel, qrChannel, styleChannel)
 
 	audioService := NewAudioService()
 
@@ -157,4 +168,25 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Println("Application stopped with error", err.Error())
 	}
+}
+
+// startupFailureText превращает ошибку inits.Open() в текст для
+// fatalDialog. Ошибки миграции и открытия (backend/inits/migrate.go,
+// db.go — AmbiguousCandidatesError, CorruptDestinationError,
+// MigrationFailedError, CandidateUnreadableError, OpenFailedError) знают,
+// как объяснить себя оператору и называют следующее действие (Р11
+// ревизии) — dialogBody здесь локальный интерфейс: структурное
+// соответствие метода избавляет от импорта конкретных типов ошибок сюда.
+// Общий шаблон — запасной путь на случай, если когда-нибудь появится
+// путь отказа без типизированной ошибки (например paths.DBPath()); текст
+// ошибки уже содержит путь и причину (все обёртки в inits начинаются с
+// "не удалось..."), поэтому не задваивается никаким префиксом здесь.
+func startupFailureText(err error) string {
+	type dialogBody interface{ DialogBody() string }
+	var db dialogBody
+	if errors.As(err, &db) {
+		return db.DialogBody()
+	}
+	return "Не удалось подготовить базу данных.\n" + err.Error() +
+		"\n\nПроверьте, что каталог данных доступен для записи, и запустите программу снова."
 }
