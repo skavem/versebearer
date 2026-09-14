@@ -61,7 +61,10 @@
   }
 </script>
 
-<div class="flex flex-col gap-3 rounded-xl border border-base-300 bg-base-100 p-4 shadow-sm">
+<!-- Тот же язык карточки-панели, что у BackdropEditor.svelte и MiniPlayer.svelte:
+rounded-lg (было rounded-xl) без тени (была shadow-sm) — статичные панели
+в проекте плоские, тень зарезервирована за плавающими элементами. -->
+<div class="flex flex-col gap-3 rounded-lg border border-base-300 bg-base-100 p-4">
   <div class="flex items-baseline justify-between border-b border-base-300 pb-2.5">
     <div class="section-head">
       <MuiIcon name="dashboard" style="font-size: 1rem" />

@@ -35,7 +35,7 @@
     </div>
   </div>
 
-  <div class="flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm text-base-content/70 shadow-sm">
+  <div class="flex items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-sm text-base-content/70">
     <MuiIcon name="layers" style="font-size: 1.2rem" classes="text-base-content/40" />
     <span>
       Окно трансляции отображается <b>поверх</b> всех других программ на выбранном мониторе.
@@ -52,7 +52,7 @@
     {/if}
 
     {#if outputs.length === 0}
-      <div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-base-300 bg-base-100/60 p-10 text-center">
+      <div class="flex flex-col items-center gap-3 rounded-lg border border-dashed border-base-300 bg-base-100/60 p-10 text-center">
         <div class="flex h-12 w-12 items-center justify-center rounded-full bg-base-200 text-base-content/40">
           <MuiIcon name="output" style="font-size: 1.75rem" />
         </div>

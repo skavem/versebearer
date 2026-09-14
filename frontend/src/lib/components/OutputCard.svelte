@@ -84,9 +84,9 @@
     // Янтарь = эфир, синий = «окно оператора здесь». neutral для эфира не
     // годился: в тёмной теме он темнее рамки простой карточки, и работающий
     // выход выглядел тусклее простаивающего.
-    projecting
-      ? "border-secondary shadow-md shadow-secondary/20"
-      : "border-base-300",
+    // Статичная карточка не несёт тени (см. правило BackdropEditor.svelte) —
+    // «в эфире» обозначено цветом рамки и янтарным бейджем, без shadow-md.
+    projecting ? "border-secondary" : "border-base-300",
     isCurrent && "ring-2 ring-primary ring-offset-2 ring-offset-base-100",
   ]}
 >
