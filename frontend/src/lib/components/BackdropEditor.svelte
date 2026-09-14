@@ -90,7 +90,13 @@
   });
 </script>
 
-<div class="flex flex-col gap-4 rounded-xl border border-base-300 bg-base-100 p-5 shadow-sm">
+<!-- Рамка/скругление/паддинг — тот же язык, что у карточек-панелей на
+других вкладках (MiniPlayer.svelte:118: rounded-lg border border-base-300
+bg-base-100 p-3..p-4). Раньше здесь были rounded-xl (12px вместо 8px) и
+shadow-sm — на «Библии»/«Песнях»/«Звуке» статичные панели всегда плоские,
+без тени: тень там только у плавающих элементов (кнопка импорта, всплывающий
+прогресс — PlaylistPanel.svelte:438,461). -->
+<div class="flex flex-col gap-4 rounded-lg border border-base-300 bg-base-100 p-4">
   <!-- Header -->
   <div class="flex items-center justify-between border-b border-base-300 pb-3">
     <div class="flex items-center gap-2">

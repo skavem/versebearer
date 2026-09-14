@@ -5,7 +5,11 @@
   import { visualStore } from "$lib/stores/visualStore.svelte";
 </script>
 
-<div class="flex h-[calc(100vh-4rem)] flex-col gap-3 overflow-y-auto p-4">
+<!-- gap-2 — тот же ритм, что на «Библии»/«Песнях»/«Звуке» (Bible.svelte:111,
+Songs.svelte:101, Audio.svelte:141): там между блоками страницы всегда gap-2,
+здесь раньше был gap-3 — единственное реальное отличие в отступах верхнего
+уровня. -->
+<div class="flex h-[calc(100vh-4rem)] flex-col gap-2 overflow-y-auto p-4">
   <ThemeBar />
 
   {#if !visualStore.loaded}
@@ -22,7 +26,7 @@
       onDeleteImage={(id) => visualStore.deleteImage(id)}
     />
 
-    <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+    <div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
       <StyleEditor
         title="Стих"
         style={visualStore.verseStyle}
