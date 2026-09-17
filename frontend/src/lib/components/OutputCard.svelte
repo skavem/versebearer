@@ -202,20 +202,20 @@
     </div>
 
     {#if monitorState === "missing"}
-      <div class="flex items-center gap-1.5 rounded-md bg-warning/10 p-2 text-xs text-warning">
+      <div class="flex items-center gap-1.5 rounded-lg bg-warning/10 p-2 text-xs text-warning">
         <MuiIcon name="warning" style="font-size: 1rem" />
         {isWindowMode
           ? "Монитор для центрирования не найден — откроется на основном"
           : "Монитор не найден — выберите другой"}
       </div>
     {:else if monitorState === "unassigned" && !isWindowMode}
-      <div class="flex items-center gap-1.5 rounded-md bg-base-200/60 p-2 text-xs text-base-content/50">
+      <div class="flex items-center gap-1.5 rounded-lg bg-base-200/60 p-2 text-xs text-base-content/50">
         <MuiIcon name="info" style="font-size: 1rem" />
         Монитор не выбран — трансляция недоступна
       </div>
     {:else if monitorState === "ready"}
       <div class="grid grid-cols-2 gap-2 text-sm">
-        <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <div class="flex flex-col rounded-lg bg-base-200/60 p-2">
           <span class="text-[10px] uppercase tracking-wide text-base-content/50">
             Разрешение
           </span>
@@ -223,7 +223,7 @@
             {monitor?.Bounds.Width}×{monitor?.Bounds.Height}
           </span>
         </div>
-        <div class="flex flex-col rounded-md bg-base-200/60 p-2">
+        <div class="flex flex-col rounded-lg bg-base-200/60 p-2">
           <span class="text-[10px] uppercase tracking-wide text-base-content/50">
             Масштаб
           </span>
@@ -254,7 +254,7 @@
       </div>
 
       <label
-        class="flex cursor-pointer items-center justify-between gap-2 rounded-md bg-base-200/60 p-2"
+        class="flex cursor-pointer items-center justify-between gap-2 rounded-lg bg-base-200/60 p-2"
         title="Показывать системную рамку и заголовок окна"
       >
         <span class="flex items-center gap-1 text-sm">
@@ -270,7 +270,7 @@
       </label>
 
       <label
-        class="flex cursor-pointer items-center justify-between gap-2 rounded-md bg-base-200/60 p-2"
+        class="flex cursor-pointer items-center justify-between gap-2 rounded-lg bg-base-200/60 p-2"
         title="Держать окно поверх остальных приложений"
       >
         <span class="flex items-center gap-1 text-sm">
@@ -288,7 +288,7 @@
 
     <label
       class={[
-        "flex items-center justify-between gap-2 rounded-md bg-base-200/60 p-2",
+        "flex items-center justify-between gap-2 rounded-lg bg-base-200/60 p-2",
         projecting ? "cursor-not-allowed opacity-60" : "cursor-pointer",
       ]}
       title={projecting
