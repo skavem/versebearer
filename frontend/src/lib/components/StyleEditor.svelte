@@ -116,8 +116,9 @@
 {/snippet}
 
 <!-- Тот же язык карточки-панели, что у BackdropEditor.svelte и MiniPlayer.svelte:
-rounded-lg (было rounded-xl) без тени (была shadow-sm) — на остальных вкладках
-статичные панели плоские, тень зарезервирована за плавающими элементами. -->
+без тени — на остальных вкладках статичные панели плоские, тень зарезервирована
+за плавающими элементами. rounded-lg здесь ничего не скругляет: коробки в этом
+интерфейсе прямоугольные, см. borderRadius в tailwind.config.js. -->
 <div class="flex flex-col gap-4 rounded-lg border border-base-300 bg-base-100 p-4">
   <!-- Header -->
   <div class="flex items-center justify-between border-b border-base-300 pb-2.5">

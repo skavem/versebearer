@@ -9,10 +9,23 @@ export default {
         seawave: "#1B4965",
         sealight: "#62B6CB",
       },
+      // Коробки в этом интерфейсе не скруглены: панели, карточки, списки и
+      // выпадающие меню — прямоугольные. Скругление осталось только у круглых
+      // элементов (rounded-full) и у мелких органов управления — кнопок и
+      // бейджей (--rounded-btn/--rounded-badge в теме ниже).
+      //
+      // ⚠️ Здесь стояло var(--radius), но саму --radius никто никогда не
+      // объявлял: ни в исходниках, ни в собранном CSS её нет. Правило
+      // border-radius: var(--radius) недействительно и молча отбрасывается,
+      // так что все 29 мест с rounded-lg давали ноль — но по случайности, а
+      // не по замыслу. Скруглены при этом оказывались только компоненты
+      // daisyUI, которые берут радиус из своих переменных, и карточки выхода
+      // выглядели круглыми среди прямоугольных панелей. Ноль теперь задан
+      // явно, чтобы следующий rounded-lg вёл себя предсказуемо.
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "0",
+        md: "0",
+        sm: "0",
       },
       fontFamily: {
         sans: [...fontFamily.sans],
@@ -42,7 +55,11 @@ export default {
           warning: "#B5822E",
           error: "#C0453B",
           "error-content": "#ffffff",
-          "--rounded-box": "0.5rem", // border radius rounded-box utility class, used in card and other large boxes
+          // Коробки не скруглены — см. borderRadius выше. Здесь ноль обязан
+          // совпадать с ним: rounded-box достаётся card и выпадающим меню,
+          // и именно из-за 0.5rem карточки выходов выглядели круглыми среди
+          // прямоугольных панелей.
+          "--rounded-box": "0",
           "--rounded-btn": "0.25rem", // border radius rounded-btn utility class, used in buttons and similar element
           "--rounded-badge": "0.25rem", // border radius rounded-badge utility class, used in badges and similar
           "--animation-btn": "0.25s", // duration of animation when you click on button
@@ -75,7 +92,7 @@ export default {
           warning: "#E0B45C",
           error: "#E07064", // мягкий коралловый, не резкий
           "error-content": "#1c0806",
-          "--rounded-box": "0.5rem",
+          "--rounded-box": "0", // как в mytheme
           "--rounded-btn": "0.25rem",
           "--rounded-badge": "0.25rem",
           "--animation-btn": "0.25s",

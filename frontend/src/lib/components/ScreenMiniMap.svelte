@@ -14,20 +14,15 @@
 
   // Карта рисуется в своей системе координат 640×200 и растягивается на всю
   // ширину панели — на широком окне это увеличение примерно в 2,7 раза. Для
-  // геометрии так и надо: мониторы обязаны расти вместе с панелью. Но радиус
-  // угла и толщина рамки — это оформление, оно должно совпадать с соседними
-  // панелями, а не умножаться вместе с картинкой. Иначе получается ровно то,
-  // что видно глазом: скругление 16 px рядом с 8 px у всех остальных панелей,
-  // хотя в коде написано 6.
+  // геометрии так и надо: мониторы обязаны расти вместе с панелью. Но толщина
+  // рамки — это оформление, она не должна умножаться вместе с картинкой, иначе
+  // выходит рамка в 5 px рядом с однопиксельными у соседних панелей. Решается
+  // через vector-effect в разметке.
   //
-  // Толщина рамки решается через vector-effect (см. разметку), а радиус
-  // приходится пересчитывать: нужное число в единицах карты зависит от того,
-  // во сколько раз её растянули.
-  const CARD_RADIUS_PX = 8; // = rounded-lg, общий радиус панелей приложения
-  let mapWidth = $state(0);
-  const cornerRadius = $derived(
-    mapWidth > 0 ? (CARD_RADIUS_PX * VIEW_W) / mapWidth : CARD_RADIUS_PX,
-  );
+  // Скругления у прямоугольников монитора нет: коробки в этом интерфейсе
+  // прямоугольные (см. borderRadius в tailwind.config.js). Пересчитывать
+  // радиус из единиц карты в экранные пиксели больше не нужно — ноль
+  // одинаков в любом масштабе.
 
   const bounds = $derived.by(() => {
     if (monitors.length === 0) {
@@ -79,8 +74,9 @@
 </script>
 
 <!-- Тот же язык карточки-панели, что у BackdropEditor.svelte и MiniPlayer.svelte:
-rounded-lg (было rounded-xl) без тени (была shadow-sm) — статичные панели
-в проекте плоские, тень зарезервирована за плавающими элементами. -->
+без тени — статичные панели в проекте плоские, тень зарезервирована за
+плавающими элементами. rounded-lg здесь ничего не скругляет: коробки в этом
+интерфейсе прямоугольные, см. borderRadius в tailwind.config.js. -->
 <div class="flex flex-col gap-3 rounded-lg border border-base-300 bg-base-100 p-4">
   <div class="flex items-baseline justify-between border-b border-base-300 pb-2.5">
     <div class="section-head">
@@ -93,7 +89,6 @@ rounded-lg (было rounded-xl) без тени (была shadow-sm) — ста
   </div>
   <svg
     viewBox="0 0 {VIEW_W} {VIEW_H}"
-    bind:clientWidth={mapWidth}
     class="h-auto w-full select-none"
     role="img"
     aria-label="Спатиал-карта мониторов"
@@ -121,8 +116,6 @@ rounded-lg (было rounded-xl) без тени (была shadow-sm) — ста
           y={rect.y}
           width={rect.w}
           height={rect.h}
-          rx={cornerRadius}
-          ry={cornerRadius}
           vector-effect="non-scaling-stroke"
           class={[
             "transition-all",
