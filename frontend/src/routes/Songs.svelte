@@ -98,7 +98,7 @@
   });
 </script>
 
-<div class="flex h-[calc(100vh-4rem)] flex-row gap-2 p-4">
+<div class="flex h-full flex-row gap-2 p-4">
   <div class="flex w-1/3 flex-col gap-2 lg:w-1/5">
     <SongsSelect />
 

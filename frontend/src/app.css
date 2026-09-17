@@ -7,15 +7,17 @@
 @layer base {
   html,
   body {
-    @apply bg-base-100 text-base-content;
+    @apply h-full overflow-hidden bg-base-100 text-base-content;
   }
 }
 
 /* While a modal is open DaisyUI locks page scroll with
    `overflow:hidden; scrollbar-gutter:stable`. The reserved gutter shows a
    strip of the page background on the right (visible now that html/body carry
-   a themed background). This operator UI never scrolls at the document level
-   — each panel scrolls internally — so drop the gutter reservation. */
+   a themed background), and reserving it mid-session shifts the whole layout
+   sideways. The document never scrolls here — html/body are overflow:hidden
+   above and scrolling happens inside the tab area (see routes/+page.svelte) —
+   so there is no gutter to keep stable. Drop the reservation. */
 :root:has(
     :is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open])
   ) {

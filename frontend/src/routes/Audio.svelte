@@ -174,7 +174,7 @@
   });
 </script>
 
-<div class="flex h-[calc(100vh-4rem)] flex-col gap-2 p-4">
+<div class="flex h-full flex-col gap-2 p-4">
   <div class="flex items-center justify-between gap-2">
     <h2 class="text-lg font-semibold">Звук</h2>
     <AudioDeviceSelect />

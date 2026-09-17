@@ -108,7 +108,7 @@
   });
 </script>
 
-<div class="flex h-[calc(100vh-4rem)] flex-row gap-2 p-4">
+<div class="flex h-full flex-row gap-2 p-4">
   <div class="flex flex-col gap-2">
     <Select
       bind:items={translations.list}

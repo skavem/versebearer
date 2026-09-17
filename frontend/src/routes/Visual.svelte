@@ -9,7 +9,7 @@
 Songs.svelte:101, Audio.svelte:141): там между блоками страницы всегда gap-2,
 здесь раньше был gap-3 — единственное реальное отличие в отступах верхнего
 уровня. -->
-<div class="flex h-[calc(100vh-4rem)] flex-col gap-2 overflow-y-auto p-4">
+<div class="flex flex-col gap-2 p-4">
   <ThemeBar />
 
   {#if !visualStore.loaded}
