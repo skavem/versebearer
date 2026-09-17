@@ -12,6 +12,23 @@
   const VIEW_H = 200;
   const PAD = 16;
 
+  // Карта рисуется в своей системе координат 640×200 и растягивается на всю
+  // ширину панели — на широком окне это увеличение примерно в 2,7 раза. Для
+  // геометрии так и надо: мониторы обязаны расти вместе с панелью. Но радиус
+  // угла и толщина рамки — это оформление, оно должно совпадать с соседними
+  // панелями, а не умножаться вместе с картинкой. Иначе получается ровно то,
+  // что видно глазом: скругление 16 px рядом с 8 px у всех остальных панелей,
+  // хотя в коде написано 6.
+  //
+  // Толщина рамки решается через vector-effect (см. разметку), а радиус
+  // приходится пересчитывать: нужное число в единицах карты зависит от того,
+  // во сколько раз её растянули.
+  const CARD_RADIUS_PX = 8; // = rounded-lg, общий радиус панелей приложения
+  let mapWidth = $state(0);
+  const cornerRadius = $derived(
+    mapWidth > 0 ? (CARD_RADIUS_PX * VIEW_W) / mapWidth : CARD_RADIUS_PX,
+  );
+
   const bounds = $derived.by(() => {
     if (monitors.length === 0) {
       return { minX: 0, minY: 0, maxX: 1, maxY: 1, scale: 1 };
@@ -76,6 +93,7 @@ rounded-lg (было rounded-xl) без тени (была shadow-sm) — ста
   </div>
   <svg
     viewBox="0 0 {VIEW_W} {VIEW_H}"
+    bind:clientWidth={mapWidth}
     class="h-auto w-full select-none"
     role="img"
     aria-label="Спатиал-карта мониторов"
@@ -103,12 +121,17 @@ rounded-lg (было rounded-xl) без тени (была shadow-sm) — ста
           y={rect.y}
           width={rect.w}
           height={rect.h}
-          rx="6"
-          ry="6"
+          rx={cornerRadius}
+          ry={cornerRadius}
+          vector-effect="non-scaling-stroke"
           class={[
             "transition-all",
             // Янтарь = эфир, синий = «окно оператора здесь» — как в OutputCard.
             projecting ? "fill-secondary" : "fill-base-200",
+            // non-scaling-stroke выше задаёт толщину в экранных пикселях, а не
+            // в единицах карты: рамка остаётся 2 px на любой ширине окна.
+            // Без него она умножалась вместе с картинкой и доходила до 5 px
+            // при однопиксельных рамках у соседних панелей.
             "stroke-2",
             isCurrent ? "stroke-primary" : "stroke-base-300",
             !output && "opacity-50",
